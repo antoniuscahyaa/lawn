@@ -24,8 +24,10 @@ jobs:
 
       - name: Install Android SDK packages
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-29" "build-tools;28.0.3"
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-29" "build-tools;28.0.3"
 
       - name: Build debug APK
         working-directory: src
@@ -33,9 +35,31 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleAospWithQuickstepLawnchairDevDebug --no-daemon --stacktrace
 
+      - name: Sign APK
+        working-directory: src
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          APK=$(find build/outputs/apk -name '*.apk' | head -n1)
+          BT="$ANDROID_HOME/build-tools/28.0.3"
+          mkdir -p signed
+          "$BT/zipalign" -f -p 4 "$APK" signed/aligned.apk
+          "$BT/apksigner" sign \
+            --ks "$RUNNER_TEMP/release.jks" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            --out signed/Lawnchair-ios-recents.apk signed/aligned.apk
+          "$BT/apksigner" verify --print-certs signed/Lawnchair-ios-recents.apk
+          rm -f signed/aligned.apk "$RUNNER_TEMP/release.jks"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Lawnchair-ios-recents
-          path: src/build/outputs/apk/**/*.apk
+          path: src/signed/*.apk
           if-no-files-found: error
