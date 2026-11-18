@@ -69,16 +69,23 @@ jobs:
           }
           KOTLIN
 
+      - name: Terapkan patch v2 (Opsi C, tanpa ikon, tanpa dock)
+        run: |
+          if [ ! -f ios-recents-v2.patch ]; then
+            echo "::error::ios-recents-v2.patch tidak ada di root repo"; exit 1
+          fi
+          patch -p1 -d src < ios-recents-v2.patch
+
       - name: Atur varian ci (paket ch.deletescape.lawnchair.ci)
         working-directory: src
         run: |
           # Matikan verifikasi tanda tangan resmi (kita pakai keystore sendiri)
           sed -i '/applicationIdSuffix ".ci"/,/^        }/ s/"SIGNATURE_VERIFICATION", "true"/"SIGNATURE_VERIFICATION", "false"/' build.gradle
           # versionCode lebih tinggi dari build lama agar bisa menggantikan
-          sed -i 's/^\( *\)versionCode 2$/\1versionCode 2199999/' build.gradle
+          sed -i 's/^\( *\)versionCode 2$/\1versionCode 90000000/' build.gradle
           sed -i 's/^\( *\)versionName majorMinor$/\1versionName "10.0 Alpha 8 iOS"/' build.gradle
           echo "branch=mod" >> local.properties
-          grep -n 'SIGNATURE_VERIFICATION\|versionCode 2199999\|10.0 Alpha 8 iOS' build.gradle
+          grep -n 'SIGNATURE_VERIFICATION\|versionCode 90000000\|10.0 Alpha 8 iOS' build.gradle
 
       - name: Set up JDK 8
         uses: actions/setup-java@v4
