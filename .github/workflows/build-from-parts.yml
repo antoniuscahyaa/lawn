@@ -80,7 +80,11 @@ jobs:
           export JAVA_HOME="$JAVA_HOME_17_X64"
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKM" --licenses > /dev/null || true
-          "$SDKM" "platforms;android-29" "build-tools;28.0.3"
+          "$SDKM" "platforms;android-29" "build-tools;28.0.3" "ndk;21.4.7075529"
+          NDK="$ANDROID_HOME/ndk/21.4.7075529"
+          echo "ANDROID_NDK_HOME=$NDK" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
+          echo "ndk.dir=$NDK" >> src/local.properties
 
       - name: Tambah mirror repositori (jcenter sudah mati)
         run: |
