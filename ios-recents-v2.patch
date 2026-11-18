@@ -1,0 +1,362 @@
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/launcher3/uioverrides/states/OverviewState.java b/quickstep/recents_ui_overrides/src/com/android/launcher3/uioverrides/states/OverviewState.java
+--- a/quickstep/recents_ui_overrides/src/com/android/launcher3/uioverrides/states/OverviewState.java	2026-11-18 15:54:00.039170817 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/launcher3/uioverrides/states/OverviewState.java	2026-11-18 15:54:00.100271011 +0000
+@@ -130,8 +130,9 @@
+         } else {
+             boolean hasAllAppsHeaderExtra = launcher.getAppsView() != null
+                     && launcher.getAppsView().getFloatingHeaderView().hasVisibleContent();
+-            return HOTSEAT_SEARCH_BOX | VERTICAL_SWIPE_INDICATOR | RECENTS_CLEAR_ALL_BUTTON |
+-                    (hasAllAppsHeaderExtra ? ALL_APPS_HEADER_EXTRA : HOTSEAT_ICONS);
++            // Dock (hotseat icons and search box) is hidden in overview
++            return VERTICAL_SWIPE_INDICATOR | RECENTS_CLEAR_ALL_BUTTON |
++                    (hasAllAppsHeaderExtra ? ALL_APPS_HEADER_EXTRA : 0);
+         }
+     }
+ 
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskMenuView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskMenuView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskMenuView.java	2026-11-18 15:54:00.036167997 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskMenuView.java	2026-11-18 15:54:19.759036391 +0000
+@@ -34,6 +34,8 @@
+ import android.view.MotionEvent;
+ import android.view.View;
+ import android.view.ViewGroup;
++import android.content.res.ColorStateList;
++import android.widget.GridLayout;
+ import android.widget.LinearLayout;
+ import android.widget.TextView;
+ 
+@@ -96,7 +98,7 @@
+     private IconView mTaskIcon;
+     private AnimatorSet mOpenCloseAnimator;
+     private TaskView mTaskView;
+-    private LinearLayout mOptionLayout;
++    private GridLayout mOptionLayout;
+     private FastBitmapDrawable mMenuIconDrawable;
+ 
+     public TaskMenuView(Context context, AttributeSet attrs) {
+@@ -151,6 +153,7 @@
+ 
+         // Remove all scale listeners when menu is removed
+         mTaskView.getIconView().removeUpdateScaleListener(mTaskViewIconScaleListener);
++        mTaskView.setMenuChevronOpen(false);
+         mTaskIcon.removeUpdateScaleListener(mMenuIconScaleListener);
+     }
+ 
+@@ -175,7 +178,8 @@
+     private void setBackgroundRadius() {
+         float radius = TaskCornerRadius.get(getContext());
+         GradientDrawable background = (GradientDrawable) ((LayerDrawable) getBackground()).getDrawable(1);
+-        background.setCornerRadii(new float[] {radius, radius, radius, radius, 0, 0, 0, 0});
++        background.setCornerRadii(new float[] {radius, radius, radius, radius,
++                radius, radius, radius, radius});
+     }
+ 
+     private boolean populateAndShowForTask(TaskView taskView) {
+@@ -186,6 +190,7 @@
+         mTaskView = taskView;
+         addMenuOptions(mTaskView);
+         orientAroundTaskView(mTaskView);
++        mTaskView.setMenuChevronOpen(true);
+         post(this::animateOpen);
+         return true;
+     }
+@@ -212,19 +217,58 @@
+         final List<TaskSystemShortcut> shortcuts =
+                 TaskOverlayFactory.INSTANCE.get(getContext()).getEnabledShortcuts(taskView);
+         final int count = shortcuts.size();
++        int halfCells = 0;
+         for (int i = 0; i < count; ++i) {
+             final TaskSystemShortcut menuOption = shortcuts.get(i);
+-            addMenuOption(menuOption, menuOption.getOnClickListener(activity, taskView));
++            final boolean danger = menuOption instanceof TaskSystemShortcut.ForceStop;
++            final boolean wide = danger || (i == count - 1 && halfCells % 2 == 0);
++            if (wide) {
++                halfCells = 0;
++            } else {
++                halfCells++;
++            }
++            addMenuOption(menuOption, menuOption.getOnClickListener(activity, taskView),
++                    wide, danger);
+         }
+     }
+ 
+-    private void addMenuOption(TaskSystemShortcut menuOption, OnClickListener onClickListener) {
+-        ViewGroup menuOptionView = (ViewGroup) mActivity.getLayoutInflater().inflate(
+-                R.layout.task_view_menu_option, this, false);
+-        menuOption.setIconAndLabelFor(
+-                menuOptionView.findViewById(R.id.icon), menuOptionView.findViewById(R.id.text));
++    private void addMenuOption(TaskSystemShortcut menuOption, OnClickListener onClickListener,
++            boolean wide, boolean danger) {
++        final float density = getResources().getDisplayMetrics().density;
++        final int gap = (int) (3 * density);
++        LinearLayout menuOptionView = (LinearLayout) mActivity.getLayoutInflater().inflate(
++                R.layout.task_view_menu_option, mOptionLayout, false);
++        View iconView = menuOptionView.findViewById(R.id.icon);
++        TextView textView = menuOptionView.findViewById(R.id.text);
++        menuOption.setIconAndLabelFor(iconView, textView);
+         menuOptionView.setOnClickListener(onClickListener);
+-        mOptionLayout.addView(menuOptionView);
++
++        if (wide) {
++            menuOptionView.setOrientation(LinearLayout.HORIZONTAL);
++            menuOptionView.setGravity(Gravity.CENTER);
++            LinearLayout.LayoutParams iconParams =
++                    (LinearLayout.LayoutParams) iconView.getLayoutParams();
++            iconParams.setMargins(0, 0, (int) (8 * density), 0);
++            iconParams.gravity = Gravity.CENTER_VERTICAL;
++            iconView.setLayoutParams(iconParams);
++            LinearLayout.LayoutParams textParams =
++                    (LinearLayout.LayoutParams) textView.getLayoutParams();
++            textParams.width = LinearLayout.LayoutParams.WRAP_CONTENT;
++            textView.setLayoutParams(textParams);
++            textView.setPadding(0, 0, 0, 0);
++        }
++        if (danger) {
++            final int red = 0xFFD4351C;
++            iconView.setBackgroundTintList(ColorStateList.valueOf(red));
++            textView.setTextColor(red);
++        }
++
++        GridLayout.LayoutParams gridParams = new GridLayout.LayoutParams(
++                GridLayout.spec(GridLayout.UNDEFINED),
++                GridLayout.spec(GridLayout.UNDEFINED, wide ? 2 : 1, 1f));
++        gridParams.width = 0;
++        gridParams.setMargins(gap, gap, gap, gap);
++        mOptionLayout.addView(menuOptionView, gridParams);
+     }
+ 
+     private void orientAroundTaskView(TaskView taskView) {
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-18 15:54:00.032944061 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-18 15:54:00.100651078 +0000
+@@ -36,6 +36,7 @@
+ import android.graphics.Rect;
+ import android.graphics.RectF;
+ import android.graphics.drawable.Drawable;
++import android.graphics.drawable.GradientDrawable;
+ import android.os.Bundle;
+ import android.os.Handler;
+ import android.util.AttributeSet;
+@@ -46,6 +47,7 @@
+ import android.view.ViewOutlineProvider;
+ import android.view.accessibility.AccessibilityNodeInfo;
+ import android.widget.FrameLayout;
++import android.widget.ImageView;
+ import android.widget.TextView;
+ import android.widget.Toast;
+ 
+@@ -155,6 +157,8 @@
+     private TaskMenuView mMenuView;
+     private IconView mIconView;
+     private TextView mTitleView;
++    private View mHeaderBg;
++    private ImageView mChevronView;
+     private final DigitalWellBeingToast mDigitalWellBeingToast;
+     private float mCurveScale;
+     private float mFullscreenProgress;
+@@ -228,6 +232,22 @@
+         mSnapshotView = findViewById(R.id.snapshot);
+         mIconView = findViewById(R.id.icon);
+         mTitleView = findViewById(R.id.task_title);
++        mHeaderBg = findViewById(R.id.task_header_bg);
++        mChevronView = findViewById(R.id.task_chevron);
++
++        GradientDrawable headerBg = new GradientDrawable();
++        headerBg.setColor(getContext().getColor(R.color.task_card_header_bg));
++        headerBg.setCornerRadii(new float[] {mCornerRadius, mCornerRadius, mCornerRadius,
++                mCornerRadius, 0, 0, 0, 0});
++        mHeaderBg.setBackground(headerBg);
++
++        OnClickListener openMenu = v -> showTaskMenu(Touch.TAP);
++        mChevronView.setOnClickListener(openMenu);
++        mTitleView.setOnClickListener(openMenu);
++    }
++
++    public void setMenuChevronOpen(boolean open) {
++        mChevronView.animate().rotation(open ? 180 : 0).setDuration(150).start();
+     }
+ 
+     public TaskMenuView getMenuView() {
+@@ -421,6 +441,7 @@
+         mIconView.setScaleX(scale);
+         mIconView.setScaleY(scale);
+         mTitleView.setAlpha(scale);
++        mChevronView.setAlpha(scale);
+ 
+         mFooterVerticalOffset = 1.0f - scale;
+         for (FooterWrapper footer : mFooters) {
+@@ -634,7 +655,7 @@
+             RectF insets = mFullscreenParams.mCurrentDrawnInsets;
+             float scale = mFullscreenParams.mScale;
+             outline.setRoundRect(0,
+-                    (int) (mMarginTop * scale),
++                    0,
+                     (int) ((insets.left + view.getWidth() + insets.right) * scale),
+                     (int) ((insets.top + view.getHeight() + insets.bottom) * scale),
+                     mFullscreenParams.mCurrentDrawnCornerRadius);
+@@ -801,8 +822,10 @@
+         }
+         mFullscreenProgress = progress;
+         boolean isFullscreen = mFullscreenProgress > 0;
+-        mIconView.setVisibility(progress < 1 ? VISIBLE : INVISIBLE);
+-        mTitleView.setVisibility(progress < 1 ? VISIBLE : INVISIBLE);
++        int headerVisibility = progress < 1 ? VISIBLE : INVISIBLE;
++        mHeaderBg.setVisibility(headerVisibility);
++        mTitleView.setVisibility(headerVisibility);
++        mChevronView.setVisibility(headerVisibility);
+         setClipChildren(!isFullscreen);
+         setClipToPadding(!isFullscreen);
+ 
+diff -ruN a/quickstep/res/drawable/ic_task_chevron_down.xml b/quickstep/res/drawable/ic_task_chevron_down.xml
+--- a/quickstep/res/drawable/ic_task_chevron_down.xml	1970-01-01 00:00:00.000000000 +0000
++++ b/quickstep/res/drawable/ic_task_chevron_down.xml	2026-11-18 15:54:00.108232209 +0000
+@@ -0,0 +1,9 @@
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp"
++    android:height="24dp"
++    android:viewportWidth="24"
++    android:viewportHeight="24">
++    <path
++        android:fillColor="#FFFFFFFF"
++        android:pathData="M7.41,8.59L12,13.17l4.59,-4.58L18,10l-6,6 -6,-6z"/>
++</vector>
+diff -ruN a/quickstep/res/drawable/task_menu_tile_bg.xml b/quickstep/res/drawable/task_menu_tile_bg.xml
+--- a/quickstep/res/drawable/task_menu_tile_bg.xml	1970-01-01 00:00:00.000000000 +0000
++++ b/quickstep/res/drawable/task_menu_tile_bg.xml	2026-11-18 15:54:00.108944066 +0000
+@@ -0,0 +1,4 @@
++<shape xmlns:android="http://schemas.android.com/apk/res/android">
++    <corners android:radius="12dp" />
++    <solid android:color="@color/task_menu_tile_bg" />
++</shape>
+diff -ruN a/quickstep/res/layout/task.xml b/quickstep/res/layout/task.xml
+--- a/quickstep/res/layout/task.xml	2026-11-18 15:54:00.023973197 +0000
++++ b/quickstep/res/layout/task.xml	2026-11-18 15:54:00.099854221 +0000
+@@ -21,6 +21,12 @@
+     android:elevation="4dp"
+     android:focusable="true">
+ 
++    <View
++        android:id="@+id/task_header_bg"
++        android:layout_width="match_parent"
++        android:layout_height="@dimen/task_header_bg_height"
++        android:layout_gravity="top"/>
++
+     <com.android.quickstep.views.TaskThumbnailView
+         android:id="@+id/snapshot"
+         android:layout_width="match_parent"
+@@ -32,23 +38,33 @@
+         android:layout_width="@dimen/task_header_icon_size"
+         android:layout_height="@dimen/task_header_icon_size"
+         android:layout_gravity="top|start"
+-        android:layout_marginStart="4dp"
+-        android:layout_marginTop="6dp"
++        android:visibility="gone"
+         android:focusable="false"
+         android:importantForAccessibility="no"/>
+ 
+     <TextView
+         android:id="@+id/task_title"
+         android:layout_width="match_parent"
+-        android:layout_height="@dimen/task_header_icon_size"
++        android:layout_height="@dimen/task_thumbnail_top_margin"
+         android:layout_gravity="top|start"
+-        android:layout_marginStart="38dp"
+-        android:layout_marginEnd="4dp"
+-        android:layout_marginTop="6dp"
++        android:layout_marginStart="14dp"
++        android:layout_marginEnd="44dp"
+         android:gravity="center_vertical|start"
+         android:singleLine="true"
+         android:ellipsize="end"
+-        android:textColor="?android:attr/textColorPrimary"
++        android:textColor="@color/task_card_header_text"
+         android:textSize="@dimen/task_header_title_text_size"
++        android:textStyle="bold"
+         android:importantForAccessibility="no"/>
+-</com.android.quickstep.views.TaskView>
+\ No newline at end of file
++
++    <ImageView
++        android:id="@+id/task_chevron"
++        android:layout_width="@dimen/task_thumbnail_top_margin"
++        android:layout_height="@dimen/task_thumbnail_top_margin"
++        android:layout_gravity="top|end"
++        android:padding="10dp"
++        android:src="@drawable/ic_task_chevron_down"
++        android:tint="@color/task_card_header_text"
++        android:background="?android:attr/selectableItemBackgroundBorderless"
++        android:scaleType="fitCenter"/>
++</com.android.quickstep.views.TaskView>
+diff -ruN a/quickstep/res/layout/task_menu.xml b/quickstep/res/layout/task_menu.xml
+--- a/quickstep/res/layout/task_menu.xml	2026-11-18 15:54:00.026903530 +0000
++++ b/quickstep/res/layout/task_menu.xml	2026-11-18 15:54:00.100027004 +0000
+@@ -26,6 +26,7 @@
+ 
+     <com.android.quickstep.views.IconView
+       android:id="@+id/task_icon"
++      android:visibility="gone"
+       android:layout_width="@dimen/task_thumbnail_icon_size"
+       android:layout_height="@dimen/task_thumbnail_icon_size"
+       android:layout_gravity="top|center_horizontal"
+@@ -35,19 +36,21 @@
+ 
+     <TextView
+         android:id="@+id/task_name"
++        android:visibility="gone"
+         android:layout_width="match_parent"
+         android:layout_height="wrap_content"
+         android:gravity="center_horizontal"
+         android:layout_marginBottom="16dp"
+         android:textSize="12sp"/>
+ 
+-    <LinearLayout
++    <GridLayout
+         android:id="@+id/menu_option_layout"
+-        style="@style/TaskMenu"
+-        android:divider="@drawable/all_apps_divider"
+-        android:showDividers="beginning"
+-        android:paddingStart="@dimen/task_card_menu_horizontal_padding"
+-        android:paddingEnd="@dimen/task_card_menu_horizontal_padding"
++        android:columnCount="2"
++        android:useDefaultMargins="false"
++        android:paddingStart="8dp"
++        android:paddingEnd="8dp"
++        android:paddingTop="8dp"
++        android:paddingBottom="8dp"
+         android:layout_width="match_parent"
+         android:layout_height="wrap_content"/>
+ 
+diff -ruN a/quickstep/res/layout/task_view_menu_option.xml b/quickstep/res/layout/task_view_menu_option.xml
+--- a/quickstep/res/layout/task_view_menu_option.xml	2026-11-18 15:54:00.030395657 +0000
++++ b/quickstep/res/layout/task_view_menu_option.xml	2026-11-18 15:54:00.100141285 +0000
+@@ -23,7 +23,8 @@
+     android:orientation="vertical"
+     android:paddingTop="@dimen/task_card_menu_option_vertical_padding"
+     android:paddingBottom="@dimen/task_card_menu_option_vertical_padding"
+-    android:background="?android:attr/selectableItemBackground"
++    android:background="@drawable/task_menu_tile_bg"
++    android:foreground="?android:attr/selectableItemBackground"
+     android:theme="@style/PopupItem" >
+ 
+     <View
+diff -ruN a/quickstep/res/values/task_card_colors.xml b/quickstep/res/values/task_card_colors.xml
+--- a/quickstep/res/values/task_card_colors.xml	1970-01-01 00:00:00.000000000 +0000
++++ b/quickstep/res/values/task_card_colors.xml	2026-11-18 15:54:00.110622265 +0000
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <color name="task_card_header_bg">#FFFFFFFF</color>
++    <color name="task_card_header_text">#FF1C1C1E</color>
++    <color name="task_menu_tile_bg">#14000000</color>
++    <dimen name="task_header_bg_height">56dp</dimen>
++</resources>
+diff -ruN a/quickstep/res/values-night/task_card_colors.xml b/quickstep/res/values-night/task_card_colors.xml
+--- a/quickstep/res/values-night/task_card_colors.xml	1970-01-01 00:00:00.000000000 +0000
++++ b/quickstep/res/values-night/task_card_colors.xml	2026-11-18 15:54:00.111749381 +0000
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <color name="task_card_header_bg">#FF2C2C2E</color>
++    <color name="task_card_header_text">#FFFFFFFF</color>
++    <color name="task_menu_tile_bg">#1FFFFFFF</color>
++</resources>
