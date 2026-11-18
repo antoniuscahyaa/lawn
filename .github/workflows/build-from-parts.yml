@@ -29,11 +29,23 @@ jobs:
           yes | "$SDKM" --licenses > /dev/null || true
           "$SDKM" "platforms;android-29" "build-tools;28.0.3"
 
+      - name: Tambah mirror repositori (jcenter sudah mati)
+        run: |
+          cat > "$RUNNER_TEMP/extra-repos.gradle" <<'GRADLE'
+          allprojects {
+              repositories {
+                  maven { url 'https://maven.aliyun.com/repository/jcenter' }
+                  maven { url 'https://maven.aliyun.com/repository/public' }
+                  maven { url 'https://maven.aliyun.com/repository/google' }
+              }
+          }
+          GRADLE
+
       - name: Build debug APK
         working-directory: src
         run: |
           chmod +x gradlew
-          ./gradlew assembleAospWithQuickstepLawnchairDevDebug --no-daemon --stacktrace
+          ./gradlew -I "$RUNNER_TEMP/extra-repos.gradle" assembleAospWithQuickstepLawnchairDevDebug --no-daemon --stacktrace
 
       - name: Sign APK
         working-directory: src
