@@ -104,7 +104,15 @@ jobs:
           chmod +x gradlew
           ./gradlew -I "$RUNNER_TEMP/extra-repos.gradle" assembleAospWithQuickstepLawnchairDevDebug --no-daemon --stacktrace
 
+      - name: Upload APK tanpa tanda tangan keystore (cadangan)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lawnchair-debug-unsigned
+          path: src/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
       - name: Sign APK
+        shell: bash
         working-directory: src
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -112,19 +120,33 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then echo "::error::Secret $v kosong atau belum dibuat"; exit 1; fi
+          done
+
+          KS="$RUNNER_TEMP/release.jks"
+          printf '%s' "$KEYSTORE_BASE64" | tr -d ' \r\n\t' | base64 -d > "$KS" \
+            || { echo "::error::KEYSTORE_BASE64 bukan base64 yang valid"; exit 1; }
+          echo "Ukuran keystore: $(stat -c %s "$KS") byte"
+
+          keytool -list -keystore "$KS" -storepass:env KEYSTORE_PASSWORD -alias "$KEY_ALIAS" > "$RUNNER_TEMP/keytool.txt" 2>&1 \
+            || { echo "::error::Keystore tidak bisa dibuka. Cek password keystore, alias, atau isi base64"; sed 's/^/keytool: /' "$RUNNER_TEMP/keytool.txt"; exit 1; }
+
           APK=$(find build/outputs/apk -name '*.apk' | head -n1)
+          [ -n "$APK" ] || { echo "::error::APK hasil build tidak ditemukan"; find build/outputs -maxdepth 4; exit 1; }
+          echo "APK: $APK"
+
           BT="$ANDROID_HOME/build-tools/28.0.3"
           mkdir -p signed
           "$BT/zipalign" -f -p 4 "$APK" signed/aligned.apk
           "$BT/apksigner" sign \
-            --ks "$RUNNER_TEMP/release.jks" \
+            --ks "$KS" \
             --ks-key-alias "$KEY_ALIAS" \
             --ks-pass env:KEYSTORE_PASSWORD \
             --key-pass env:KEY_PASSWORD \
             --out signed/Lawnchair-ios-recents.apk signed/aligned.apk
           "$BT/apksigner" verify --print-certs signed/Lawnchair-ios-recents.apk
-          rm -f signed/aligned.apk "$RUNNER_TEMP/release.jks"
+          rm -f signed/aligned.apk "$KS"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
