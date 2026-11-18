@@ -69,6 +69,17 @@ jobs:
           }
           KOTLIN
 
+      - name: Atur varian ci (paket ch.deletescape.lawnchair.ci)
+        working-directory: src
+        run: |
+          # Matikan verifikasi tanda tangan resmi (kita pakai keystore sendiri)
+          sed -i '/applicationIdSuffix ".ci"/,/^        }/ s/"SIGNATURE_VERIFICATION", "true"/"SIGNATURE_VERIFICATION", "false"/' build.gradle
+          # versionCode lebih tinggi dari build lama agar bisa menggantikan
+          sed -i 's/^\( *\)versionCode 2$/\1versionCode 2199999/' build.gradle
+          sed -i 's/^\( *\)versionName majorMinor$/\1versionName "10.0 Alpha 8 iOS"/' build.gradle
+          echo "branch=mod" >> local.properties
+          grep -n 'SIGNATURE_VERIFICATION\|versionCode 2199999\|10.0 Alpha 8 iOS' build.gradle
+
       - name: Set up JDK 8
         uses: actions/setup-java@v4
         with:
@@ -102,7 +113,7 @@ jobs:
         working-directory: src
         run: |
           chmod +x gradlew
-          ./gradlew -I "$RUNNER_TEMP/extra-repos.gradle" assembleAospWithQuickstepLawnchairDevDebug --no-daemon --stacktrace
+          ./gradlew -I "$RUNNER_TEMP/extra-repos.gradle" assembleAospWithQuickstepLawnchairCiDebug --no-daemon --stacktrace
 
       - name: Upload APK tanpa tanda tangan keystore (cadangan)
         uses: actions/upload-artifact@v4
@@ -147,6 +158,26 @@ jobs:
             --out signed/Lawnchair-ios-recents.apk signed/aligned.apk
           "$BT/apksigner" verify --print-certs signed/Lawnchair-ios-recents.apk
           rm -f signed/aligned.apk "$KS"
+
+      - name: Buat modul flash (ganti APK di zip asli)
+        run: |
+          ORIG="Lawnchair_v5_0_arm64_10_20210422.zip"
+          if [ ! -f "$ORIG" ]; then
+            echo "::warning::$ORIG tidak ada di repo, modul flash dilewati (APK saja)"
+            exit 0
+          fi
+          rm -rf mod && mkdir mod
+          unzip -q "$ORIG" -d mod
+          cp src/signed/Lawnchair-ios-recents.apk mod/product/priv-app/Lawnchair/Lawnchair.apk
+          (cd mod && zip -qr -X ../Lawnchair-ios-recents-module.zip .)
+          ls -la Lawnchair-ios-recents-module.zip
+
+      - name: Upload modul flash
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lawnchair-ios-recents-module
+          path: Lawnchair-ios-recents-module.zip
+          if-no-files-found: ignore
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
