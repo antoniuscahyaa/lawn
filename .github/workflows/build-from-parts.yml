@@ -69,12 +69,14 @@ jobs:
           }
           KOTLIN
 
-      - name: Terapkan patch v2 (Opsi C, tanpa ikon, tanpa dock)
+      - name: Terapkan patch v2 dan v3 (Opsi C, bingkai 8dp, kartu di tengah)
         run: |
-          if [ ! -f ios-recents-v2.patch ]; then
-            echo "::error::ios-recents-v2.patch tidak ada di root repo"; exit 1
-          fi
-          patch -p1 -d src < ios-recents-v2.patch
+          for p in ios-recents-v2.patch ios-recents-v3.patch; do
+            if [ ! -f "$p" ]; then
+              echo "::error::$p tidak ada di root repo"; exit 1
+            fi
+            patch -p1 -d src < "$p"
+          done
 
       - name: Atur varian ci (paket ch.deletescape.lawnchair.ci)
         working-directory: src
