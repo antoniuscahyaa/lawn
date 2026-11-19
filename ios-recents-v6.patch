@@ -1,0 +1,73 @@
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/util/ClipAnimationHelper.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/util/ClipAnimationHelper.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/util/ClipAnimationHelper.java	2026-11-19 01:02:21.499899333 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/util/ClipAnimationHelper.java	2026-11-19 01:02:21.535705910 +0000
+@@ -88,6 +88,7 @@
+     private final float mWindowCornerRadius;
+     // Corner radius of windows when they're in overview mode.
+     private final float mTaskCornerRadius;
++    private final float mCardFrameInset;
+     // If windows can have real time rounded corners.
+     private final boolean mSupportsRoundedCornersOnWindows;
+     // Whether or not to actually use the rounded cornders on windows
+@@ -105,7 +106,8 @@
+     public ClipAnimationHelper(Context context) {
+         mWindowCornerRadius = getWindowCornerRadius(context);
+         mSupportsRoundedCornersOnWindows = supportsRoundedCornersOnWindows(context.getResources());
+-        mTaskCornerRadius = TaskCornerRadius.get(context);
++        mTaskCornerRadius = context.getResources().getDimension(R.dimen.task_card_inner_radius);
++        mCardFrameInset = context.getResources().getDimension(R.dimen.task_card_frame);
+         mUseRoundedCornersOnWindows = mSupportsRoundedCornersOnWindows;
+     }
+ 
+@@ -132,6 +134,10 @@
+                 mSourceStackBounds.width() - mSourceInsets.right,
+                 mSourceStackBounds.height() - mSourceInsets.bottom);
+         mTargetRect.set(targetRect);
++        // The card keeps a frame around the thumbnail (left, right and bottom)
++        mTargetRect.left += mCardFrameInset;
++        mTargetRect.right -= mCardFrameInset;
++        mTargetRect.bottom -= mCardFrameInset;
+         mTargetRect.offset(mHomeStackBounds.left - mSourceStackBounds.left,
+                 mHomeStackBounds.top - mSourceStackBounds.top);
+ 
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java	2026-11-19 01:02:21.497112464 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java	2026-11-19 01:02:21.535536097 +0000
+@@ -911,7 +911,10 @@
+         mRunningTaskTileHidden = isHidden;
+         TaskView runningTask = getRunningTaskView();
+         if (runningTask != null) {
+-            runningTask.setStableAlpha(isHidden ? 0 : mContentAlpha);
++            // Keep the card frame/header visible; only the snapshot is hidden while the app
++            // window animates into the card.
++            runningTask.setStableAlpha(mContentAlpha);
++            runningTask.setThumbnailHidden(isHidden);
+         }
+     }
+ 
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 01:02:21.494341392 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 01:02:21.535226153 +0000
+@@ -500,6 +500,7 @@
+         setTranslationY(0f);
+         setTranslationZ(0);
+         setAlpha(mStableAlpha);
++        mSnapshotView.setAlpha(1f);
+         setIconScaleAndDim(1);
+     }
+ 
+@@ -508,6 +509,14 @@
+         setFullscreenProgress(0);
+     }
+ 
++    /**
++     * Hides only the app snapshot (e.g. while the app window animates into the card) so the
++     * frame and header of the card stay visible.
++     */
++    public void setThumbnailHidden(boolean hidden) {
++        mSnapshotView.setAlpha(hidden ? 0f : 1f);
++    }
++
+     public void setStableAlpha(float parentAlpha) {
+         mStableAlpha = parentAlpha;
+         setAlpha(mStableAlpha);
