@@ -1,0 +1,60 @@
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/launcher3/uioverrides/states/OverviewPeekState.java b/quickstep/recents_ui_overrides/src/com/android/launcher3/uioverrides/states/OverviewPeekState.java
+--- a/quickstep/recents_ui_overrides/src/com/android/launcher3/uioverrides/states/OverviewPeekState.java	2026-11-19 06:03:56.001303868 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/launcher3/uioverrides/states/OverviewPeekState.java	2026-11-19 06:04:03.073508731 +0000
+@@ -16,7 +16,7 @@
+ package com.android.launcher3.uioverrides.states;
+ import static com.android.launcher3.anim.AnimatorSetBuilder.ANIM_OVERVIEW_FADE;
+ import static com.android.launcher3.anim.AnimatorSetBuilder.ANIM_OVERVIEW_SCRIM_FADE;
+-import static com.android.launcher3.anim.AnimatorSetBuilder.ANIM_OVERVIEW_TRANSLATE_X;
++import static com.android.launcher3.anim.AnimatorSetBuilder.ANIM_OVERVIEW_TRANSLATE_Y;
+ import static com.android.launcher3.anim.Interpolators.FAST_OUT_SLOW_IN;
+ import static com.android.launcher3.anim.Interpolators.INSTANT;
+ import static com.android.launcher3.anim.Interpolators.OVERSHOOT_1_7;
+@@ -34,8 +34,9 @@
+     @Override
+     public ScaleAndTranslation getOverviewScaleAndTranslation(Launcher launcher) {
+         ScaleAndTranslation result = super.getOverviewScaleAndTranslation(launcher);
+-        result.translationX = NORMAL.getOverviewScaleAndTranslation(launcher).translationX
+-                - launcher.getResources().getDimension(R.dimen.overview_peek_distance);
++        // Peek by rising halfway from the bottom (no sideways movement)
++        result.translationX = 0;
++        result.translationY = NORMAL.getOverviewScaleAndTranslation(launcher).translationY * 0.5f;
+         return result;
+     }
+ 
+@@ -44,7 +45,7 @@
+             AnimatorSetBuilder builder) {
+         if (this == OVERVIEW_PEEK && fromState == NORMAL) {
+             builder.setInterpolator(ANIM_OVERVIEW_FADE, INSTANT);
+-            builder.setInterpolator(ANIM_OVERVIEW_TRANSLATE_X, OVERSHOOT_1_7);
++            builder.setInterpolator(ANIM_OVERVIEW_TRANSLATE_Y, FAST_OUT_SLOW_IN);
+             builder.setInterpolator(ANIM_OVERVIEW_SCRIM_FADE, FAST_OUT_SLOW_IN);
+         }
+     }
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java	2026-11-19 06:03:56.004081752 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java	2026-11-19 06:03:56.050061422 +0000
+@@ -1412,6 +1412,10 @@
+                 + (getHeight() - mInsets.bottom - getPaddingBottom())) / 2);
+         setPivotX(((mInsets.left + getPaddingLeft())
+                 + (getWidth() - mInsets.right - getPaddingRight())) / 2);
++
++        // Positions are only valid after layout; refresh the stacked-carousel transforms so no
++        // card is left with stale offset/alpha (e.g. a hidden center card).
++        updateCurveProperties();
+     }
+ 
+     private void updateDeadZoneRects() {
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 06:03:56.006806132 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 06:03:56.050335115 +0000
+@@ -609,7 +609,8 @@
+         setTranslationZ(getResources().getDimension(R.dimen.task_card_stack_z)
+                 * (1f - Math.min(distance, layers + 1f) / (layers + 1f)));
+         // Cards beyond the last visible layer fade out
+-        float fade = 1f - Utilities.boundToRange((distance - layers) / 0.4f, 0f, 1f);
++        float fade = (stride <= 0 || getWidth() == 0) ? 1f
++                : 1f - Utilities.boundToRange((distance - layers) / 0.4f, 0f, 1f);
+         setAlpha(mStableAlpha * fade);
+ 
+         mFooterAlpha = Utilities.boundToRange(1.0f - 2 * scrollState.linearInterpolation, 0f, 1f);
