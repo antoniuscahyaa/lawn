@@ -1,0 +1,326 @@
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/launcher3/LauncherAppTransitionManagerImpl.java b/quickstep/recents_ui_overrides/src/com/android/launcher3/LauncherAppTransitionManagerImpl.java
+--- a/quickstep/recents_ui_overrides/src/com/android/launcher3/LauncherAppTransitionManagerImpl.java	2026-11-19 05:17:48.064543980 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/launcher3/LauncherAppTransitionManagerImpl.java	2026-11-19 05:17:48.143731304 +0000
+@@ -16,7 +16,7 @@
+ 
+ package com.android.launcher3;
+ 
+-import static com.android.launcher3.LauncherAnimUtils.VIEW_TRANSLATE_X;
++import static com.android.launcher3.LauncherAnimUtils.VIEW_TRANSLATE_Y;
+ import static com.android.launcher3.LauncherState.NORMAL;
+ import static com.android.launcher3.allapps.AllAppsTransitionController.ALL_APPS_PROGRESS;
+ import static com.android.launcher3.anim.Interpolators.AGGRESSIVE_EASE;
+@@ -157,7 +157,7 @@
+                         RecentsView.CONTENT_ALPHA, values);
+             case INDEX_RECENTS_TRANSLATE_X_ANIM:
+                 return new SpringObjectAnimator<>(mLauncher.getOverviewPanel(),
+-                        VIEW_TRANSLATE_X, MIN_VISIBLE_CHANGE_PIXELS, 0.8f, 250, values);
++                        VIEW_TRANSLATE_Y, MIN_VISIBLE_CHANGE_PIXELS, 0.8f, 250, values);
+             default:
+                 return super.createStateElementAnimation(index, values);
+         }
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/LauncherActivityControllerHelper.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/LauncherActivityControllerHelper.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/LauncherActivityControllerHelper.java	2026-11-19 05:17:48.067678245 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/LauncherActivityControllerHelper.java	2026-11-19 05:17:48.143877524 +0000
+@@ -281,39 +281,28 @@
+ 
+                 int runningTaskIndex = recentsView.getRunningTaskIndex();
+                 if (runningTaskIndex == 0) {
+-                    // If we are on the first task (we haven't quick switched), translate recents in
+-                    // from the side. Calculate the start translation based on current scale/scroll.
+-                    float currScale = recentsView.getScaleX();
+-                    float scrollOffsetX = recentsView.getScrollOffset();
++                    // If we are on the first task (we haven't quick switched), raise recents
++                    // from the bottom of the screen.
++                    float offscreenY = NORMAL.getOverviewScaleAndTranslation(activity)
++                            .translationY;
+ 
+-                    float offscreenX = NORMAL.getOverviewScaleAndTranslation(activity).translationX;
+-                    // The first task is hidden, so offset by its width.
+-                    int firstTaskWidth = recentsView.getTaskViewAt(0).getWidth();
+-                    offscreenX -= (firstTaskWidth + recentsView.getPageSpacing()) * currScale;
+-                    // Offset since scale pushes tasks outwards.
+-                    offscreenX += firstTaskWidth * (currScale - 1) / 2;
+-                    offscreenX = Math.max(0, offscreenX);
+-                    if (recentsView.isRtl()) {
+-                        offscreenX = -offscreenX;
+-                    }
+-
+-                    float fromTranslationX = attached ? offscreenX - scrollOffsetX : 0;
+-                    float toTranslationX = attached ? 0 : offscreenX - scrollOffsetX;
++                    float fromTranslationY = attached ? offscreenY : 0;
++                    float toTranslationY = attached ? 0 : offscreenY;
+                     activity.getStateManager()
+                             .cancelStateElementAnimation(INDEX_RECENTS_TRANSLATE_X_ANIM);
+ 
+                     if (!recentsView.isShown() && animate) {
+-                        recentsView.setTranslationX(fromTranslationX);
++                        recentsView.setTranslationY(fromTranslationY);
+                     } else {
+-                        fromTranslationX = recentsView.getTranslationX();
++                        fromTranslationY = recentsView.getTranslationY();
+                     }
+ 
+                     if (!animate) {
+-                        recentsView.setTranslationX(toTranslationX);
++                        recentsView.setTranslationY(toTranslationY);
+                     } else {
+                         activity.getStateManager().createStateElementAnimation(
+                                 INDEX_RECENTS_TRANSLATE_X_ANIM,
+-                                fromTranslationX, toTranslationX).start();
++                                fromTranslationY, toTranslationY).start();
+                     }
+ 
+                     fadeAnim.setInterpolator(attached ? INSTANT : ACCEL_2);
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/ClearAllButton.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/ClearAllButton.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/ClearAllButton.java	2026-11-19 05:17:48.075741528 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/ClearAllButton.java	2026-11-19 05:17:48.144700085 +0000
+@@ -17,11 +17,13 @@
+ package com.android.quickstep.views;
+ 
+ import android.content.Context;
++import android.graphics.Rect;
+ import android.util.AttributeSet;
+ import android.util.Property;
+ import android.widget.Button;
+ 
+ import ch.deletescape.lawnchair.font.CustomFontManager;
++import com.android.launcher3.R;
+ import com.android.launcher3.Utilities;
+ import com.android.quickstep.views.RecentsView.PageCallbacks;
+ import com.android.quickstep.views.RecentsView.ScrollState;
+@@ -48,6 +50,7 @@
+     private final boolean mIsRtl;
+ 
+     private int mScrollOffset;
++    private final Rect mTmpRect = new Rect();
+ 
+     public ClearAllButton(Context context, AttributeSet attrs) {
+         super(context, attrs);
+@@ -84,14 +87,22 @@
+ 
+     @Override
+     public void onPageScroll(ScrollState scrollState) {
+-        float width = getWidth();
+-        if (width == 0) {
++        RecentsView parent = (RecentsView) getParent();
++        if (parent == null || getWidth() == 0) {
+             return;
+         }
+ 
+-        float shift = Math.min(scrollState.scrollFromEdge, width);
+-        setTranslationX(mIsRtl ? (mScrollOffset - shift) : (mScrollOffset + shift));
+-        mScrollAlpha = 1 - shift / width;
++        // Pinned at the bottom center of the screen, just below the cards
++        float targetLeft = parent.getScrollX() + (parent.getWidth() - getWidth()) / 2f;
++        setTranslationX(targetLeft - getLeft());
++
++        parent.getTaskSize(mTmpRect);
++        float margin = getResources().getDimension(R.dimen.clear_all_bottom_margin);
++        float targetTop = Math.min(mTmpRect.bottom + margin,
++                parent.getHeight() - getHeight() - margin);
++        setTranslationY(targetTop - getTop());
++
++        mScrollAlpha = 1;
+         updateAlpha();
+     }
+ 
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/LauncherRecentsView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/LauncherRecentsView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/LauncherRecentsView.java	2026-11-19 05:17:48.078391158 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/LauncherRecentsView.java	2026-11-19 05:17:48.144337810 +0000
+@@ -247,9 +247,8 @@
+         super.setOverviewStateEnabled(enabled);
+         if (enabled) {
+             LauncherState state = mActivity.getStateManager().getState();
+-            boolean hasClearAllButton = (state.getVisibleElements(mActivity)
+-                    & RECENTS_CLEAR_ALL_BUTTON) != 0;
+-            setDisallowScrollToClearAll(!hasClearAllButton);
++            // Clear all is pinned at the bottom center, so its page is never scrolled to
++            setDisallowScrollToClearAll(true);
+         }
+     }
+ 
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java	2026-11-19 05:17:48.073064653 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java	2026-11-19 05:17:48.144163949 +0000
+@@ -697,9 +697,7 @@
+         final int pageCount = getPageCount();
+         for (int i = 0; i < pageCount; i++) {
+             View page = getPageAt(i);
+-            // Exclude the stacked-carousel offset so it does not feed back into the layout math
+-            float pageCenter = page.getLeft() + page.getTranslationX()
+-                    - ((PageCallbacks) page).getCurveTranslationX() + halfPageWidth;
++            float pageCenter = page.getLeft() + page.getTranslationX() + halfPageWidth;
+             float distanceFromScreenCenter = screenCenter - pageCenter;
+             float distanceToReachEdge = halfScreenWidth + halfPageWidth + pageSpacing;
+             mScrollState.linearInterpolation = Math.min(1,
+@@ -1337,9 +1335,8 @@
+         mContentAlpha = alpha;
+         for (int i = getTaskViewCount() - 1; i >= 0; i--) {
+             TaskView child = getTaskViewAt(i);
+-            if (!mRunningTaskTileHidden || child.getTask().key.id != mRunningTaskId) {
+-                child.setStableAlpha(alpha);
+-            }
++            // The running task keeps its frame/header; only its snapshot is hidden separately
++            child.setStableAlpha(alpha);
+         }
+         mClearAllButton.setContentAlpha(mContentAlpha);
+ 
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 05:17:48.070436240 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 05:17:48.144545763 +0000
+@@ -31,6 +31,9 @@
+ import android.animation.ValueAnimator.AnimatorUpdateListener;
+ import android.app.ActivityOptions;
+ import android.content.Context;
++import android.content.Intent;
++import android.content.pm.LauncherActivityInfo;
++import android.os.UserHandle;
+ import android.content.res.Resources;
+ import android.graphics.Outline;
+ import android.graphics.Rect;
+@@ -54,6 +57,9 @@
+ import com.android.launcher3.BaseDraggingActivity;
+ import com.android.launcher3.R;
+ import com.android.launcher3.Utilities;
++import com.android.launcher3.compat.LauncherAppsCompat;
++
++import ch.deletescape.lawnchair.override.AppInfoProvider;
+ import com.android.launcher3.anim.AnimatorPlaybackController;
+ import com.android.launcher3.anim.Interpolators;
+ import com.android.launcher3.logging.UserEventDispatcher;
+@@ -171,6 +177,7 @@
+     private final DigitalWellBeingToast mDigitalWellBeingToast;
+     private float mCurveScale;
+     private float mCurveTranslationX;
++    private float mBaseTranslationX;
+     private float mFullscreenProgress;
+     private final FullscreenDrawParams mCurrentFullscreenParams;
+     private final float mCornerRadius;
+@@ -257,6 +264,46 @@
+         mTitleView.setOnClickListener(openMenu);
+     }
+ 
++    /**
++     * Translation set by animations and gestures; the stacked-carousel offset is added on top of
++     * it so the two never overwrite each other.
++     */
++    @Override
++    public void setTranslationX(float translationX) {
++        mBaseTranslationX = translationX;
++        super.setTranslationX(mBaseTranslationX + mCurveTranslationX);
++    }
++
++    @Override
++    public float getTranslationX() {
++        return mBaseTranslationX;
++    }
++
++    @Override
++    public float getX() {
++        return super.getX() + mCurveTranslationX;
++    }
++
++    private void applyCurveTranslationX() {
++        super.setTranslationX(mBaseTranslationX + mCurveTranslationX);
++    }
++
++    /** Label as shown in the app drawer (including user edited labels). */
++    private CharSequence resolveTaskLabel(Task task) {
++        try {
++            Intent intent = task.key.baseIntent;
++            UserHandle user = UserHandle.of(task.key.userId);
++            LauncherActivityInfo info =
++                    LauncherAppsCompat.getInstance(getContext()).resolveActivity(intent, user);
++            if (info != null) {
++                return AppInfoProvider.Companion.getInstance(getContext()).getTitle(info);
++            }
++        } catch (RuntimeException e) {
++            // Fall back to the system description below
++        }
++        return task.titleDescription;
++    }
++
+     public void setMenuChevronOpen(boolean open) {
+         mChevronView.animate().rotation(open ? 180 : 0).setDuration(150).start();
+     }
+@@ -385,7 +432,7 @@
+             mIconLoadRequest = iconCache.updateIconInBackground(mTask,
+                     (task) -> {
+                         setIcon(task.icon);
+-                        mTitleView.setText(task.titleDescription);
++                        mTitleView.setText(resolveTaskLabel(task));
+                         if (ENABLE_QUICKSTEP_LIVE_TILE.get() && isRunningTask()) {
+                             getRecentsView().updateLiveTileIcon(task.icon);
+                         }
+@@ -558,7 +605,7 @@
+         }
+         float tuck = Math.max(0f, distance * stride - stackedDistance);
+         mCurveTranslationX = Math.signum(scrollState.pageOffset) * tuck;
+-        setTranslationX(mCurveTranslationX);
++        applyCurveTranslationX();
+         setTranslationZ(getResources().getDimension(R.dimen.task_card_stack_z)
+                 * (1f - Math.min(distance, layers + 1f) / (layers + 1f)));
+         // Cards beyond the last visible layer fade out
+diff -ruN a/quickstep/res/drawable/clear_all_pill_bg.xml b/quickstep/res/drawable/clear_all_pill_bg.xml
+--- a/quickstep/res/drawable/clear_all_pill_bg.xml	1970-01-01 00:00:00.000000000 +0000
++++ b/quickstep/res/drawable/clear_all_pill_bg.xml	2026-11-19 05:17:48.152087984 +0000
+@@ -0,0 +1,9 @@
++<ripple xmlns:android="http://schemas.android.com/apk/res/android"
++    android:color="?android:attr/colorControlHighlight">
++    <item>
++        <shape android:shape="rectangle">
++            <corners android:radius="100dp" />
++            <solid android:color="@color/task_card_header_bg" />
++        </shape>
++    </item>
++</ripple>
+diff -ruN a/quickstep/res/layout/overview_clear_all_button.xml b/quickstep/res/layout/overview_clear_all_button.xml
+--- a/quickstep/res/layout/overview_clear_all_button.xml	2026-11-19 05:17:48.081045043 +0000
++++ b/quickstep/res/layout/overview_clear_all_button.xml	2026-11-19 05:17:48.144796456 +0000
+@@ -23,8 +23,17 @@
+     android:layout_height="wrap_content"
+     android:text="@string/recents_clear_all"
+     android:textAllCaps="false"
+-    android:textColor="?attr/workspaceTextColor"
++    android:background="@drawable/clear_all_pill_bg"
++    android:textColor="@color/task_card_header_text"
++    android:textStyle="bold"
+     android:textSize="14sp"
+-    android:translationY="@dimen/task_thumbnail_half_top_margin"
++    android:minWidth="0dp"
++    android:minHeight="0dp"
++    android:paddingStart="24dp"
++    android:paddingEnd="24dp"
++    android:paddingTop="10dp"
++    android:paddingBottom="10dp"
++    android:elevation="8dp"
++    android:translationZ="8dp"
+     app:customFontType="button"
+     />
+\ No newline at end of file
+diff -ruN a/quickstep/res/values/task_card_colors.xml b/quickstep/res/values/task_card_colors.xml
+--- a/quickstep/res/values/task_card_colors.xml	2026-11-19 05:17:48.083685899 +0000
++++ b/quickstep/res/values/task_card_colors.xml	2026-11-19 05:17:48.144884861 +0000
+@@ -8,5 +8,6 @@
+     <dimen name="task_card_inner_radius">16dp</dimen>
+     <dimen name="task_card_stack_peek">40dp</dimen>
+     <dimen name="task_card_stack_step">26dp</dimen>
++    <dimen name="clear_all_bottom_margin">24dp</dimen>
+     <dimen name="task_card_stack_z">8dp</dimen>
+ </resources>
+diff -ruN a/quickstep/src/com/android/launcher3/uioverrides/UiFactory.java b/quickstep/src/com/android/launcher3/uioverrides/UiFactory.java
+--- a/quickstep/src/com/android/launcher3/uioverrides/UiFactory.java	2026-11-19 05:17:48.061672564 +0000
++++ b/quickstep/src/com/android/launcher3/uioverrides/UiFactory.java	2026-11-19 05:17:48.143511305 +0000
+@@ -256,9 +256,8 @@
+ 
+     public static ScaleAndTranslation getOverviewScaleAndTranslationForNormalState(Launcher l) {
+         if (SysUINavigationMode.getMode(l) == Mode.NO_BUTTON) {
+-            float offscreenTranslationX = l.getDeviceProfile().widthPx
+-                    - l.getOverviewPanel().getPaddingStart();
+-            return new ScaleAndTranslation(1f, offscreenTranslationX, 0f);
++            // Recents rises from the bottom of the screen
++            return new ScaleAndTranslation(1f, 0f, l.getDeviceProfile().heightPx);
+         }
+         return new ScaleAndTranslation(1.1f, 0f, 0f);
+     }
