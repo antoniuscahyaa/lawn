@@ -69,9 +69,9 @@ jobs:
           }
           KOTLIN
 
-      - name: Terapkan patch v2 sampai v7 (menu, bingkai, carousel tumpuk)
+      - name: Terapkan patch v2 sampai v8 (menu, bingkai, carousel tumpuk)
         run: |
-          for p in ios-recents-v2.patch ios-recents-v3.patch ios-recents-v4.patch ios-recents-v5.patch ios-recents-v6.patch ios-recents-v7.patch; do
+          for p in ios-recents-v2.patch ios-recents-v3.patch ios-recents-v4.patch ios-recents-v5.patch ios-recents-v6.patch ios-recents-v7.patch ios-recents-v8.patch; do
             if [ ! -f "$p" ]; then
               echo "::error::$p tidak ada di root repo"; exit 1
             fi
