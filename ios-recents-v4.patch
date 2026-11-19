@@ -1,0 +1,184 @@
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java	2026-11-19 00:37:04.808016699 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java	2026-11-19 00:37:04.856283433 +0000
+@@ -697,11 +697,16 @@
+         final int pageCount = getPageCount();
+         for (int i = 0; i < pageCount; i++) {
+             View page = getPageAt(i);
+-            float pageCenter = page.getLeft() + page.getTranslationX() + halfPageWidth;
++            // Exclude the stacked-carousel offset so it does not feed back into the layout math
++            float pageCenter = page.getLeft() + page.getTranslationX()
++                    - ((PageCallbacks) page).getCurveTranslationX() + halfPageWidth;
+             float distanceFromScreenCenter = screenCenter - pageCenter;
+             float distanceToReachEdge = halfScreenWidth + halfPageWidth + pageSpacing;
+             mScrollState.linearInterpolation = Math.min(1,
+                     Math.abs(distanceFromScreenCenter) / distanceToReachEdge);
++            mScrollState.pageStride = getNormalChildWidth() + pageSpacing;
++            mScrollState.pageOffset = mScrollState.pageStride > 0
++                    ? distanceFromScreenCenter / mScrollState.pageStride : 0;
+             ((PageCallbacks) page).onPageScroll(mScrollState);
+         }
+     }
+@@ -1009,6 +1014,11 @@
+          * Updates the page UI based on scroll params.
+          */
+         default void onPageScroll(ScrollState scrollState) {}
++
++        /** Horizontal offset currently applied by the carousel curve (stacked cards). */
++        default float getCurveTranslationX() {
++            return 0f;
++        }
+     }
+ 
+     public static class ScrollState {
+@@ -1023,6 +1033,15 @@
+          * The amount by which all the content is scrolled relative to the end of the list.
+          */
+         public float scrollFromEdge;
++
++        /**
++         * Signed distance of the page from the screen center in page strides.
++         * Positive when the page is left of the center.
++         */
++        public float pageOffset;
++
++        /** Distance in pixels between the centers of two adjacent pages. */
++        public float pageStride;
+     }
+ 
+     public void setIgnoreResetTask(int taskId) {
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 00:37:04.810296498 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 00:37:12.587221044 +0000
+@@ -98,6 +98,10 @@
+      */
+     public static final float MAX_PAGE_SCRIM_ALPHA = 0.4f;
+ 
++    /** Stacked carousel: scale and scrim of the cards adjacent to the centered card. */
++    private static final float STACK_NEIGHBOR_SCALE = 0.92f;
++    private static final float STACK_NEIGHBOR_DIM = 0.14f;
++
+     /**
+      * How much to scale down pages near the edge of the screen.
+      */
+@@ -161,6 +165,7 @@
+     private ImageView mChevronView;
+     private final DigitalWellBeingToast mDigitalWellBeingToast;
+     private float mCurveScale;
++    private float mCurveTranslationX;
+     private float mFullscreenProgress;
+     private final FullscreenDrawParams mCurrentFullscreenParams;
+     private final float mCornerRadius;
+@@ -217,7 +222,8 @@
+             mActivity.getStatsLogManager().logTaskLaunch(getRecentsView(),
+                     TaskUtils.getLaunchComponentKeyForTask(getTask().key));
+         });
+-        mCornerRadius = TaskCornerRadius.get(context);
++        // Inner (thumbnail) radius; the card itself adds the frame width for a 24dp outer radius
++        mCornerRadius = context.getResources().getDimension(R.dimen.task_card_inner_radius);
+         mWindowCornerRadius = Utilities.getWindowCornerRadius(context);
+         mCurrentFullscreenParams = new FullscreenDrawParams(mCornerRadius);
+         mDigitalWellBeingToast = new DigitalWellBeingToast(mActivity, this);
+@@ -237,7 +243,8 @@
+ 
+         GradientDrawable headerBg = new GradientDrawable();
+         headerBg.setColor(getContext().getColor(R.color.task_card_header_bg));
+-        headerBg.setCornerRadius(mCornerRadius);
++        headerBg.setCornerRadius(mCornerRadius
++                + getResources().getDimension(R.dimen.task_card_frame));
+         mHeaderBg.setBackground(headerBg);
+ 
+         OnClickListener openMenu = v -> showTaskMenu(Touch.TAP);
+@@ -483,6 +490,7 @@
+ 
+     private void resetViewTransforms() {
+         setCurveScale(1);
++        mCurveTranslationX = 0f;
+         setTranslationX(0f);
+         setTranslationY(0f);
+         setTranslationZ(0);
+@@ -512,11 +520,22 @@
+ 
+     @Override
+     public void onPageScroll(ScrollState scrollState) {
+-        float curveInterpolation =
+-                CURVE_INTERPOLATOR.getInterpolation(scrollState.linearInterpolation);
+-
+-        mSnapshotView.setDimAlpha(curveInterpolation * MAX_PAGE_SCRIM_ALPHA);
+-        setCurveScale(getCurveScaleForCurveInterpolation(curveInterpolation));
++        // Stacked carousel: adjacent cards are smaller, slightly dimmed and tucked behind the
++        // centered card so only a thin edge peeks out.
++        float distance = Math.abs(scrollState.pageOffset);
++        float t = Math.min(distance, 1f);
++        mSnapshotView.setDimAlpha(t * STACK_NEIGHBOR_DIM);
++        setCurveScale(1f - (1f - STACK_NEIGHBOR_SCALE) * t);
++
++        float peek = getResources().getDimension(R.dimen.task_card_stack_peek);
++        float targetDistance = getWidth() * (1f - STACK_NEIGHBOR_SCALE) / 2f + peek;
++        float tuck = Math.max(0f, scrollState.pageStride - targetDistance) * t;
++        mCurveTranslationX = Math.signum(scrollState.pageOffset) * tuck;
++        setTranslationX(mCurveTranslationX);
++        setTranslationZ((1f - t) * getResources().getDimension(R.dimen.task_card_stack_z));
++        // Cards beyond the first neighbor fade out
++        float fade = 1f - Utilities.boundToRange((distance - 1f) / 0.4f, 0f, 1f);
++        setAlpha(mStableAlpha * fade);
+ 
+         mFooterAlpha = Utilities.boundToRange(1.0f - 2 * scrollState.linearInterpolation, 0f, 1f);
+         for (FooterWrapper footer : mFooters) {
+@@ -623,6 +642,11 @@
+         return mCurveScale;
+     }
+ 
++    @Override
++    public float getCurveTranslationX() {
++        return mCurveTranslationX;
++    }
++
+     private void onScaleChanged() {
+         float scale = mCurveScale;
+         setScaleX(scale);
+@@ -638,10 +662,12 @@
+     private static final class TaskOutlineProvider extends ViewOutlineProvider {
+ 
+         private final int mMarginTop;
++        private final float mFrameRadius;
+         private FullscreenDrawParams mFullscreenParams;
+ 
+         TaskOutlineProvider(Resources res, FullscreenDrawParams fullscreenParams) {
+             mMarginTop = res.getDimensionPixelSize(R.dimen.task_thumbnail_top_margin);
++            mFrameRadius = res.getDimension(R.dimen.task_card_frame);
+             mFullscreenParams = fullscreenParams;
+         }
+ 
+@@ -657,7 +683,7 @@
+                     0,
+                     (int) ((insets.left + view.getWidth() + insets.right) * scale),
+                     (int) ((insets.top + view.getHeight() + insets.bottom) * scale),
+-                    mFullscreenParams.mCurrentDrawnCornerRadius);
++                    mFullscreenParams.mCurrentDrawnCornerRadius + mFrameRadius);
+         }
+     }
+ 
+diff -ruN a/quickstep/res/values/dimens.xml b/quickstep/res/values/dimens.xml
+--- a/quickstep/res/values/dimens.xml	2026-11-19 00:37:04.799220581 +0000
++++ b/quickstep/res/values/dimens.xml	2026-11-19 00:37:04.855640444 +0000
+@@ -57,7 +57,7 @@
+     <dimen name="task_card_menu_option_vertical_padding">8dp</dimen>
+     <dimen name="task_card_menu_shadow_height">3dp</dimen>
+     <dimen name="task_card_menu_horizontal_padding">0dp</dimen>
+-    <dimen name="portrait_task_card_horz_space">96dp</dimen>
++    <dimen name="portrait_task_card_horz_space">120dp</dimen>
+     <dimen name="landscape_task_card_horz_space">200dp</dimen>
+     <dimen name="multi_window_task_card_horz_space">100dp</dimen>
+     <!-- Copied from framework resource:
+diff -ruN a/quickstep/res/values/task_card_colors.xml b/quickstep/res/values/task_card_colors.xml
+--- a/quickstep/res/values/task_card_colors.xml	2026-11-19 00:37:04.804972710 +0000
++++ b/quickstep/res/values/task_card_colors.xml	2026-11-19 00:37:04.855767050 +0000
+@@ -5,4 +5,7 @@
+     <color name="task_menu_tile_bg">#14000000</color>
+     <dimen name="task_header_bg_height">56dp</dimen>
+     <dimen name="task_card_frame">8dp</dimen>
++    <dimen name="task_card_inner_radius">16dp</dimen>
++    <dimen name="task_card_stack_peek">40dp</dimen>
++    <dimen name="task_card_stack_z">8dp</dimen>
+ </resources>
