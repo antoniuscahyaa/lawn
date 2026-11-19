@@ -1,0 +1,54 @@
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java	2026-11-19 10:31:27.348720459 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/RecentsView.java	2026-11-19 10:31:27.403844914 +0000
+@@ -71,6 +71,7 @@
+ import android.view.LayoutInflater;
+ import android.view.MotionEvent;
+ import android.view.View;
++import android.view.ViewTreeObserver;
+ import android.view.ViewDebug;
+ import android.view.ViewGroup;
+ import android.view.WindowInsets;
+@@ -1192,6 +1193,7 @@
+                         startHome();
+                     } else {
+                         snapToPageImmediately(pageToSnapTo);
++                        resnapAfterLayout(pageToSnapTo);
+                     }
+                 }
+                 resetTaskVisuals();
+@@ -1201,6 +1203,34 @@
+         return pendingAnimation;
+     }
+ 
++    /**
++     * After a task is removed the page scrolls are only recomputed on the next layout. Snap again
++     * once the layout is done so the remaining cards end up centered and stacked correctly
++     * (otherwise a gap can be left in the middle).
++     */
++    private void resnapAfterLayout(final int page) {
++        getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
++            @Override
++            public boolean onPreDraw() {
++                getViewTreeObserver().removeOnPreDrawListener(this);
++                int taskCount = getTaskViewCount();
++                if (taskCount == 0) {
++                    return true;
++                }
++                for (int i = 0; i < taskCount; i++) {
++                    TaskView taskView = getTaskViewAt(i);
++                    if (taskView.getTranslationX() != 0f) {
++                        taskView.setTranslationX(0f);
++                    }
++                }
++                snapToPageImmediately(Utilities.boundToRange(page, 0, taskCount - 1));
++                updateCurveProperties();
++                // Skip this frame; the scroll change schedules a new one with the final state
++                return false;
++            }
++        });
++    }
++
+     public PendingAnimation createAllTasksDismissAnimation(long duration) {
+         if (FeatureFlags.IS_DOGFOOD_BUILD && mPendingAnimation != null) {
+             throw new IllegalStateException("Another pending animation is still running");
