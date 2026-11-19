@@ -1,0 +1,115 @@
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/launcher3/uioverrides/touchcontrollers/TaskViewTouchController.java b/quickstep/recents_ui_overrides/src/com/android/launcher3/uioverrides/touchcontrollers/TaskViewTouchController.java
+--- a/quickstep/recents_ui_overrides/src/com/android/launcher3/uioverrides/touchcontrollers/TaskViewTouchController.java	2026-11-19 00:52:06.034468862 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/launcher3/uioverrides/touchcontrollers/TaskViewTouchController.java	2026-11-19 00:52:06.074790090 +0000
+@@ -118,22 +118,30 @@
+             } else {
+                 mTaskBeingDragged = null;
+ 
++                // Stacked cards overlap, so pick the front-most card under the finger
++                // (highest translationZ) instead of the first one in child order.
++                int draggedIndex = -1;
+                 for (int i = 0; i < mRecentsView.getTaskViewCount(); i++) {
+                     TaskView view = mRecentsView.getTaskViewAt(i);
+                     if (mRecentsView.isTaskViewVisible(view) && mActivity.getDragLayer()
+                             .isEventOverView(view, ev)) {
+-                        mTaskBeingDragged = view;
+-                        if (!SysUINavigationMode.getMode(mActivity).hasGestures) {
+-                            // Don't allow swipe down to open if we don't support swipe up
+-                            // to enter overview.
+-                            directionsToDetectScroll = SwipeDetector.DIRECTION_POSITIVE;
+-                        } else {
+-                            // The task can be dragged up to dismiss it,
+-                            // and down to open if it's the current page.
+-                            directionsToDetectScroll = i == mRecentsView.getCurrentPage()
+-                                    ? SwipeDetector.DIRECTION_BOTH : SwipeDetector.DIRECTION_POSITIVE;
++                        if (mTaskBeingDragged == null
++                                || view.getTranslationZ() > mTaskBeingDragged.getTranslationZ()) {
++                            mTaskBeingDragged = view;
++                            draggedIndex = i;
+                         }
+-                        break;
++                    }
++                }
++                if (mTaskBeingDragged != null) {
++                    if (!SysUINavigationMode.getMode(mActivity).hasGestures) {
++                        // Don't allow swipe down to open if we don't support swipe up
++                        // to enter overview.
++                        directionsToDetectScroll = SwipeDetector.DIRECTION_POSITIVE;
++                    } else {
++                        // The task can be dragged up to dismiss it,
++                        // and down to open if it's the current page.
++                        directionsToDetectScroll = draggedIndex == mRecentsView.getCurrentPage()
++                                ? SwipeDetector.DIRECTION_BOTH : SwipeDetector.DIRECTION_POSITIVE;
+                     }
+                 }
+                 if (mTaskBeingDragged == null) {
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 00:52:06.031754693 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 00:52:06.074639545 +0000
+@@ -102,6 +102,11 @@
+     private static final float STACK_NEIGHBOR_SCALE = 0.92f;
+     private static final float STACK_NEIGHBOR_DIM = 0.14f;
+ 
++    /** Number of stacked cards shown on each side of the centered card (2 = 5 cards total). */
++    private static final int STACK_VISIBLE_PER_SIDE = 2;
++    private static final float STACK_DEEP_SCALE_STEP = 0.04f;
++    private static final float STACK_DEEP_DIM_STEP = 0.08f;
++
+     /**
+      * How much to scale down pages near the edge of the screen.
+      */
+@@ -520,21 +525,35 @@
+ 
+     @Override
+     public void onPageScroll(ScrollState scrollState) {
+-        // Stacked carousel: adjacent cards are smaller, slightly dimmed and tucked behind the
+-        // centered card so only a thin edge peeks out.
++        // Stacked carousel: cards next to the centered one are smaller, slightly dimmed and tucked
++        // behind it so only a thin edge peeks out. Each further layer peeks out a bit more.
++        final int layers = STACK_VISIBLE_PER_SIDE;
+         float distance = Math.abs(scrollState.pageOffset);
+         float t = Math.min(distance, 1f);
+-        mSnapshotView.setDimAlpha(t * STACK_NEIGHBOR_DIM);
+-        setCurveScale(1f - (1f - STACK_NEIGHBOR_SCALE) * t);
++        float deep = Utilities.boundToRange(distance - 1f, 0f, layers - 1f);
++        mSnapshotView.setDimAlpha(Math.min(
++                t * STACK_NEIGHBOR_DIM + deep * STACK_DEEP_DIM_STEP, MAX_PAGE_SCRIM_ALPHA));
++        setCurveScale(1f - (1f - STACK_NEIGHBOR_SCALE) * t - STACK_DEEP_SCALE_STEP * deep);
+ 
+         float peek = getResources().getDimension(R.dimen.task_card_stack_peek);
+-        float targetDistance = getWidth() * (1f - STACK_NEIGHBOR_SCALE) / 2f + peek;
+-        float tuck = Math.max(0f, scrollState.pageStride - targetDistance) * t;
++        float step = getResources().getDimension(R.dimen.task_card_stack_step);
++        float firstDistance = getWidth() * (1f - STACK_NEIGHBOR_SCALE) / 2f + peek;
++        float stride = scrollState.pageStride;
++        float stackedDistance;
++        if (distance <= 1f) {
++            stackedDistance = distance * firstDistance;
++        } else if (distance <= layers) {
++            stackedDistance = firstDistance + (distance - 1f) * step;
++        } else {
++            stackedDistance = firstDistance + (layers - 1) * step + (distance - layers) * stride;
++        }
++        float tuck = Math.max(0f, distance * stride - stackedDistance);
+         mCurveTranslationX = Math.signum(scrollState.pageOffset) * tuck;
+         setTranslationX(mCurveTranslationX);
+-        setTranslationZ((1f - t) * getResources().getDimension(R.dimen.task_card_stack_z));
+-        // Cards beyond the first neighbor fade out
+-        float fade = 1f - Utilities.boundToRange((distance - 1f) / 0.4f, 0f, 1f);
++        setTranslationZ(getResources().getDimension(R.dimen.task_card_stack_z)
++                * (1f - Math.min(distance, layers + 1f) / (layers + 1f)));
++        // Cards beyond the last visible layer fade out
++        float fade = 1f - Utilities.boundToRange((distance - layers) / 0.4f, 0f, 1f);
+         setAlpha(mStableAlpha * fade);
+ 
+         mFooterAlpha = Utilities.boundToRange(1.0f - 2 * scrollState.linearInterpolation, 0f, 1f);
+diff -ruN a/quickstep/res/values/task_card_colors.xml b/quickstep/res/values/task_card_colors.xml
+--- a/quickstep/res/values/task_card_colors.xml	2026-11-19 00:52:06.029058531 +0000
++++ b/quickstep/res/values/task_card_colors.xml	2026-11-19 00:52:06.074364706 +0000
+@@ -7,5 +7,6 @@
+     <dimen name="task_card_frame">8dp</dimen>
+     <dimen name="task_card_inner_radius">16dp</dimen>
+     <dimen name="task_card_stack_peek">40dp</dimen>
++    <dimen name="task_card_stack_step">26dp</dimen>
+     <dimen name="task_card_stack_z">8dp</dimen>
+ </resources>
