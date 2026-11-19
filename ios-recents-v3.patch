@@ -1,0 +1,96 @@
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 00:15:13.730756497 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 00:15:13.771391336 +0000
+@@ -237,8 +237,7 @@
+ 
+         GradientDrawable headerBg = new GradientDrawable();
+         headerBg.setColor(getContext().getColor(R.color.task_card_header_bg));
+-        headerBg.setCornerRadii(new float[] {mCornerRadius, mCornerRadius, mCornerRadius,
+-                mCornerRadius, 0, 0, 0, 0});
++        headerBg.setCornerRadius(mCornerRadius);
+         mHeaderBg.setBackground(headerBg);
+ 
+         OnClickListener openMenu = v -> showTaskMenu(Touch.TAP);
+diff -ruN a/quickstep/res/layout/task.xml b/quickstep/res/layout/task.xml
+--- a/quickstep/res/layout/task.xml	2026-11-19 00:15:13.724331405 +0000
++++ b/quickstep/res/layout/task.xml	2026-11-19 00:15:13.771143989 +0000
+@@ -24,14 +24,16 @@
+     <View
+         android:id="@+id/task_header_bg"
+         android:layout_width="match_parent"
+-        android:layout_height="@dimen/task_header_bg_height"
+-        android:layout_gravity="top"/>
++        android:layout_height="match_parent"/>
+ 
+     <com.android.quickstep.views.TaskThumbnailView
+         android:id="@+id/snapshot"
+         android:layout_width="match_parent"
+         android:layout_height="match_parent"
+-        android:layout_marginTop="@dimen/task_thumbnail_top_margin"/>
++        android:layout_marginTop="@dimen/task_thumbnail_top_margin"
++        android:layout_marginLeft="@dimen/task_card_frame"
++        android:layout_marginRight="@dimen/task_card_frame"
++        android:layout_marginBottom="@dimen/task_card_frame"/>
+ 
+     <com.android.quickstep.views.IconView
+         android:id="@+id/icon"
+@@ -46,10 +48,12 @@
+         android:id="@+id/task_title"
+         android:layout_width="match_parent"
+         android:layout_height="@dimen/task_thumbnail_top_margin"
+-        android:layout_gravity="top|start"
+-        android:layout_marginStart="14dp"
+-        android:layout_marginEnd="44dp"
+-        android:gravity="center_vertical|start"
++        android:layout_gravity="top|left"
++        android:layout_marginLeft="14dp"
++        android:layout_marginRight="44dp"
++        android:layoutDirection="ltr"
++        android:textDirection="ltr"
++        android:gravity="center_vertical|left"
+         android:singleLine="true"
+         android:ellipsize="end"
+         android:textColor="@color/task_card_header_text"
+@@ -61,7 +65,8 @@
+         android:id="@+id/task_chevron"
+         android:layout_width="@dimen/task_thumbnail_top_margin"
+         android:layout_height="@dimen/task_thumbnail_top_margin"
+-        android:layout_gravity="top|end"
++        android:layout_gravity="top|right"
++        android:layoutDirection="ltr"
+         android:padding="10dp"
+         android:src="@drawable/ic_task_chevron_down"
+         android:tint="@color/task_card_header_text"
+diff -ruN a/quickstep/res/values/task_card_colors.xml b/quickstep/res/values/task_card_colors.xml
+--- a/quickstep/res/values/task_card_colors.xml	2026-11-19 00:15:13.726998023 +0000
++++ b/quickstep/res/values/task_card_colors.xml	2026-11-19 00:15:13.771225377 +0000
+@@ -4,4 +4,5 @@
+     <color name="task_card_header_text">#FF1C1C1E</color>
+     <color name="task_menu_tile_bg">#14000000</color>
+     <dimen name="task_header_bg_height">56dp</dimen>
++    <dimen name="task_card_frame">8dp</dimen>
+ </resources>
+diff -ruN a/quickstep/src/com/android/quickstep/util/LayoutUtils.java b/quickstep/src/com/android/quickstep/util/LayoutUtils.java
+--- a/quickstep/src/com/android/quickstep/util/LayoutUtils.java	2026-11-19 00:15:13.734207656 +0000
++++ b/quickstep/src/com/android/quickstep/util/LayoutUtils.java	2026-11-19 00:15:13.771525459 +0000
+@@ -44,7 +44,8 @@
+         if (dp.isVerticalBarLayout()) {
+             extraSpace = 0;
+         } else {
+-            extraSpace = dp.hotseatBarSizePx + dp.verticalDragHandleSizePx;
++            // Dock is hidden in overview, so no extra space is reserved at the bottom
++            extraSpace = 0;
+         }
+         calculateTaskSize(context, dp, extraSpace, MULTI_WINDOW_STRATEGY_HALF_SCREEN, outRect);
+     }
+@@ -107,8 +108,9 @@
+ 
+         // Center in the visible space
+         float x = insets.left + (launcherVisibleWidth - outWidth) / 2;
++        // Center the whole card (header + thumbnail) vertically in the visible space
+         float y = insets.top + Math.max(topIconMargin,
+-                (launcherVisibleHeight - extraVerticalSpace - outHeight) / 2);
++                (launcherVisibleHeight - extraVerticalSpace - outHeight + topIconMargin) / 2);
+         outRect.set(Math.round(x), Math.round(y),
+                 Math.round(x) + Math.round(outWidth), Math.round(y) + Math.round(outHeight));
+     }
