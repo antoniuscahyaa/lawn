@@ -1,0 +1,47 @@
+diff -ruN a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java
+--- a/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 10:44:52.953307893 +0000
++++ b/quickstep/recents_ui_overrides/src/com/android/quickstep/views/TaskView.java	2026-11-19 10:44:53.004104207 +0000
+@@ -178,6 +178,8 @@
+     private float mCurveScale;
+     private float mCurveTranslationX;
+     private float mBaseTranslationX;
++    private float mRenderTranslationX;
++    private boolean mApplyingRenderTranslation;
+     private float mFullscreenProgress;
+     private final FullscreenDrawParams mCurrentFullscreenParams;
+     private final float mCornerRadius;
+@@ -271,12 +273,15 @@
+     @Override
+     public void setTranslationX(float translationX) {
+         mBaseTranslationX = translationX;
+-        super.setTranslationX(mBaseTranslationX + mCurveTranslationX);
++        applyRenderTranslationX();
+     }
+ 
++    /** Returns the base translation, without the stacked-carousel offset. */
+     @Override
+     public float getTranslationX() {
+-        return mBaseTranslationX;
++        // While View.setTranslationX() runs it compares against this value, so it must be the
++        // translation that is actually applied to the view, not the base one.
++        return mApplyingRenderTranslation ? mRenderTranslationX : mBaseTranslationX;
+     }
+ 
+     @Override
+@@ -285,7 +290,15 @@
+     }
+ 
+     private void applyCurveTranslationX() {
+-        super.setTranslationX(mBaseTranslationX + mCurveTranslationX);
++        applyRenderTranslationX();
++    }
++
++    private void applyRenderTranslationX() {
++        float total = mBaseTranslationX + mCurveTranslationX;
++        mApplyingRenderTranslation = true;
++        super.setTranslationX(total);
++        mApplyingRenderTranslation = false;
++        mRenderTranslationX = total;
+     }
+ 
+     /** Label as shown in the app drawer (including user edited labels). */
