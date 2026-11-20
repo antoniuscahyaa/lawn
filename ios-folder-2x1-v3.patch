@@ -1,0 +1,309 @@
+diff -ruN a/res/values/folder_resize_strings.xml b/res/values/folder_resize_strings.xml
+--- a/res/values/folder_resize_strings.xml	2026-11-20 22:04:22.566412293 +0000
++++ b/res/values/folder_resize_strings.xml	2026-11-20 22:04:22.604237707 +0000
+@@ -3,4 +3,8 @@
+     <string name="folder_resize_wide">Ubah ukuran: 2×1</string>
+     <string name="folder_resize_normal">Ubah ukuran: 1×1</string>
+     <string name="folder_resize_no_space">Tidak ada ruang kosong di sebelah folder</string>
++    <string name="folder_main_icon">Pilih ikon utama</string>
++    <string name="folder_main_icon_title">Ikon utama folder</string>
++    <string name="folder_separator_on">Garis pemisah: nyala</string>
++    <string name="folder_separator_off">Garis pemisah: mati</string>
+ </resources>
+diff -ruN a/src/com/android/launcher3/FolderInfo.java b/src/com/android/launcher3/FolderInfo.java
+--- a/src/com/android/launcher3/FolderInfo.java	2026-11-20 22:04:22.552438055 +0000
++++ b/src/com/android/launcher3/FolderInfo.java	2026-11-20 22:04:22.603489669 +0000
+@@ -67,6 +67,12 @@
+ 
+     public static final int FLAG_COVER_MODE = 0x00000008;
+ 
++    /** Wide (2x1) folder: draw a separator between the main icon and the small group. */
++    public static final int FLAG_WIDE_SEPARATOR = 0x00000010;
++
++    /** The id of the wide folder's main icon is stored in the upper bits of the options. */
++    private static final int WIDE_MAIN_ITEM_SHIFT = 8;
++
+     public int options;
+ 
+     /**
+@@ -166,6 +172,33 @@
+         }
+     }
+ 
++    public int getWideMainItemId() {
++        return options >>> WIDE_MAIN_ITEM_SHIFT;
++    }
++
++    public void setWideMainItemId(int itemId, ModelWriter writer) {
++        int oldOptions = options;
++        options = (options & ((1 << WIDE_MAIN_ITEM_SHIFT) - 1)) | (itemId << WIDE_MAIN_ITEM_SHIFT);
++        if (writer != null && oldOptions != options) {
++            writer.updateItemInDatabase(this);
++        }
++    }
++
++    /** Returns the app chosen as the main icon of a wide folder, or null for the default. */
++    @Nullable
++    public WorkspaceItemInfo getWideMainItem() {
++        int id = getWideMainItemId();
++        if (id == 0) {
++            return null;
++        }
++        for (WorkspaceItemInfo item : contents) {
++            if (item.id == id) {
++                return item;
++            }
++        }
++        return null;
++    }
++
+     public boolean hasOption(int optionFlag) {
+         return (options & optionFlag) != 0;
+     }
+diff -ruN a/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java b/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java
+--- a/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java	2026-11-20 22:04:22.560635678 +0000
++++ b/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java	2026-11-20 22:04:22.604089143 +0000
+@@ -145,8 +145,8 @@
+         mWideCircle = circleLayout;
+     }
+ 
+-    /** Fills {@param result} with the top left position of the item and returns its scale. */
+-    private float getWideItem(int index, int curNumItems, float[] result) {
++    /** Returns {bigPx, s, d, gap, groupSize, pad} for the wide layout. */
++    private float[] wideMetrics() {
+         final float w = mWideWidth;
+         final float h = mWideHeight;
+         final float bigPx = Math.min(mIconSize, h * 0.9f);
+@@ -156,18 +156,19 @@
+         float gap;
+         float groupSize;
+         if (mWideCircle) {
+-            s = h * 20f / 58f;
+-            d = h * 17f / 58f;
++            // Square 2x2 rotated by 45 degrees
++            s = h * 0.38f;
++            d = h * 0.293f;
+             gap = 0;
+             groupSize = 2 * d + s;
+         } else {
+-            s = h * 18f / 58f;
++            s = h * 0.34f;
+             d = 0;
+-            gap = h * 4f / 58f;
++            gap = h * 0.06f;
+             groupSize = 2 * s + gap;
+         }
+         float pad = (w - bigPx - groupSize) / 3f;
+-        final float minPad = h * 0.06f;
++        final float minPad = h * 0.05f;
+         if (pad < minPad) {
+             float k = (w - bigPx - 3 * minPad) / groupSize;
+             s *= k;
+@@ -176,6 +177,26 @@
+             groupSize *= k;
+             pad = minPad;
+         }
++        return new float[] {bigPx, s, d, gap, groupSize, pad};
++    }
++
++    /** X position of the separator between the main icon and the group. */
++    public float getWideSeparatorX() {
++        float[] m = wideMetrics();
++        float x = m[0] + 1.5f * m[5];
++        return mIsRtl ? mWideWidth - x : x;
++    }
++
++    /** Fills {@param result} with the top left position of the item and returns its scale. */
++    private float getWideItem(int index, int curNumItems, float[] result) {
++        final float w = mWideWidth;
++        float[] m = wideMetrics();
++        final float bigPx = m[0];
++        final float s = m[1];
++        final float d = m[2];
++        final float gap = m[3];
++        final float groupSize = m[4];
++        final float pad = m[5];
+         final float cy = mAvailableSpace / 2f;
+ 
+         float size;
+diff -ruN a/src/com/android/launcher3/folder/FolderIcon.java b/src/com/android/launcher3/folder/FolderIcon.java
+--- a/src/com/android/launcher3/folder/FolderIcon.java	2026-11-20 22:04:22.555114685 +0000
++++ b/src/com/android/launcher3/folder/FolderIcon.java	2026-11-20 22:04:22.603866046 +0000
+@@ -567,7 +567,10 @@
+         if (!onBigIcon) {
+             return false;
+         }
+-        WorkspaceItemInfo item = mInfo.contents.get(0);
++        WorkspaceItemInfo item = mInfo.getWideMainItem();
++        if (item == null) {
++            item = mInfo.contents.get(0);
++        }
+         Intent intent = item.getIntent();
+         if (intent == null) {
+             return false;
+@@ -622,6 +625,10 @@
+ 
+             if (!mBackground.drawingDelegated() && !isCustomIcon) {
+                 mBackground.drawBackground(canvas);
++                if (isWide() && mInfo.hasOption(FolderInfo.FLAG_WIDE_SEPARATOR)) {
++                    mBackground.drawWideSeparator(canvas,
++                            mPreviewLayoutRule.getWideSeparatorX());
++                }
+             }
+         } else if (!isCustomIcon || mInfo.container == Favorites.CONTAINER_HOTSEAT) return;
+ 
+@@ -681,6 +688,10 @@
+     public List<BubbleTextView> getPreviewItemsOnPage(int page) {
+         mPreviewVerifier.setFolderInfo(mFolder.getInfo());
+ 
++        if (isWide()) {
++            return getWidePreviewItems(page);
++        }
++
+         List<BubbleTextView> itemsToDisplay = new ArrayList<>();
+         List<BubbleTextView> itemsOnPage = mFolder.getItemsOnPage(page);
+         int numItems = itemsOnPage.size();
+@@ -696,6 +707,35 @@
+         return itemsToDisplay;
+     }
+ 
++    /** Wide folder: the chosen main app first, followed by the other apps in order. */
++    private List<BubbleTextView> getWidePreviewItems(int page) {
++        List<BubbleTextView> result = new ArrayList<>();
++        if (page != 0) {
++            return result;
++        }
++        List<BubbleTextView> all = mFolder.getItemsOnPage(0);
++        WorkspaceItemInfo mainItem = mInfo.getWideMainItem();
++        BubbleTextView main = null;
++        for (BubbleTextView view : all) {
++            if (mainItem != null && view.getTag() == mainItem) {
++                main = view;
++                break;
++            }
++        }
++        if (main == null && !all.isEmpty()) {
++            main = all.get(0);
++        }
++        if (main != null) {
++            result.add(main);
++        }
++        for (BubbleTextView view : all) {
++            if (view != main && result.size() < getMaxPreviewItems()) {
++                result.add(view);
++            }
++        }
++        return result;
++    }
++
+     public void verifyHighRes() {
+         int processedItemCount = 0;
+         List<BubbleTextView> itemsOnPage = mFolder.getItemsOnPage(0);
+diff -ruN a/src/com/android/launcher3/folder/FolderResizeMenu.java b/src/com/android/launcher3/folder/FolderResizeMenu.java
+--- a/src/com/android/launcher3/folder/FolderResizeMenu.java	2026-11-20 22:04:22.563349323 +0000
++++ b/src/com/android/launcher3/folder/FolderResizeMenu.java	2026-11-20 22:04:22.604173247 +0000
+@@ -15,6 +15,7 @@
+  */
+ package com.android.launcher3.folder;
+ 
++import android.app.AlertDialog;
+ import android.graphics.Rect;
+ import android.graphics.RectF;
+ import android.view.View;
+@@ -29,6 +30,7 @@
+ import com.android.launcher3.LauncherSettings;
+ import com.android.launcher3.R;
+ import com.android.launcher3.ShortcutAndWidgetContainer;
++import com.android.launcher3.WorkspaceItemInfo;
+ import com.android.launcher3.dragndrop.DragController;
+ import com.android.launcher3.dragndrop.DragOptions;
+ import com.android.launcher3.views.OptionsPopupView;
+@@ -84,9 +86,53 @@
+                     resize(launcher, icon, info, wide ? 1 : 2);
+                     return true;
+                 }));
++        if (wide) {
++            items.add(new OptionItem(R.string.folder_main_icon, R.drawable.ic_widget, 0,
++                    v -> {
++                        showMainIconChooser(launcher, icon, info);
++                        return true;
++                    }));
++            final boolean separatorOn = info.hasOption(FolderInfo.FLAG_WIDE_SEPARATOR);
++            items.add(new OptionItem(
++                    separatorOn ? R.string.folder_separator_on : R.string.folder_separator_off,
++                    R.drawable.ic_widget, 0,
++                    v -> {
++                        info.setOption(FolderInfo.FLAG_WIDE_SEPARATOR, !separatorOn,
++                                launcher.getModelWriter());
++                        icon.invalidate();
++                        return true;
++                    }));
++        }
+         OptionsPopupView.show(launcher, new RectF(rect), items);
+     }
+ 
++    private static void showMainIconChooser(Launcher launcher, FolderIcon icon,
++            FolderInfo info) {
++        if (info.contents.isEmpty()) {
++            return;
++        }
++        CharSequence[] titles = new CharSequence[info.contents.size()];
++        WorkspaceItemInfo main = info.getWideMainItem();
++        int checked = 0;
++        for (int i = 0; i < titles.length; i++) {
++            WorkspaceItemInfo item = info.contents.get(i);
++            titles[i] = item.title != null ? item.title : "";
++            if (item == main) {
++                checked = i;
++            }
++        }
++        new AlertDialog.Builder(launcher)
++                .setTitle(R.string.folder_main_icon_title)
++                .setSingleChoiceItems(titles, checked, (dialog, which) -> {
++                    info.setWideMainItemId(info.contents.get(which).id,
++                            launcher.getModelWriter());
++                    info.itemsChanged(false);
++                    icon.invalidate();
++                    dialog.dismiss();
++                })
++                .show();
++    }
++
+     private static void resize(Launcher launcher, FolderIcon icon, FolderInfo info,
+             int newSpanX) {
+         if (!(icon.getParent() instanceof ShortcutAndWidgetContainer)
+diff -ruN a/src/com/android/launcher3/folder/PreviewBackground.java b/src/com/android/launcher3/folder/PreviewBackground.java
+--- a/src/com/android/launcher3/folder/PreviewBackground.java	2026-11-20 22:04:22.557815004 +0000
++++ b/src/com/android/launcher3/folder/PreviewBackground.java	2026-11-20 22:04:22.603985474 +0000
+@@ -84,6 +84,7 @@
+     int wideHeight;
+     private static final float WIDE_HEIGHT_FACTOR = 1.22f;
+     private final RectF mWideRect = new RectF();
++    private Paint mSeparatorPaint;
+ 
+     private CellLayout mDrawingDelegate;
+     public int delegateCellX;
+@@ -186,6 +187,23 @@
+         invalidate();
+     }
+ 
++    /** Draws the thin line between the main icon and the group of a wide folder. */
++    void drawWideSeparator(Canvas canvas, float x) {
++        if (!mWide) {
++            return;
++        }
++        if (mSeparatorPaint == null) {
++            mSeparatorPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
++            mSeparatorPaint.setColor(Color.argb(210, 255, 255, 255));
++            mSeparatorPaint.setStrokeCap(Paint.Cap.ROUND);
++        }
++        mSeparatorPaint.setStrokeWidth(Math.max(2f, wideHeight * 0.012f));
++        float cy = basePreviewOffsetY + previewSize / 2f;
++        float half = wideHeight * 0.26f;
++        float px = basePreviewOffsetX + x;
++        canvas.drawLine(px, cy - half, px, cy + half, mSeparatorPaint);
++    }
++
+     public void setWide(boolean wide) {
+         mWide = wide;
+     }
