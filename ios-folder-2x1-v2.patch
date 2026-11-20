@@ -321,7 +321,7 @@ diff -ruN a/src/com/android/launcher3/folder/FolderIconPreviewVerifier.java b/sr
          if (page > 0 || mDisplayingUpperLeftQuadrant) {
 diff -ruN a/src/com/android/launcher3/folder/PreviewBackground.java b/src/com/android/launcher3/folder/PreviewBackground.java
 --- a/src/com/android/launcher3/folder/PreviewBackground.java	2026-11-20 11:27:43.172750981 +0000
-+++ b/src/com/android/launcher3/folder/PreviewBackground.java	2026-11-20 11:27:43.260130262 +0000
++++ b/src/com/android/launcher3/folder/PreviewBackground.java	2026-11-20 11:37:17.849865729 +0000
 @@ -25,6 +25,7 @@
  import android.animation.ValueAnimator;
  import android.content.Context;
@@ -330,7 +330,15 @@ diff -ruN a/src/com/android/launcher3/folder/PreviewBackground.java b/src/com/an
  import android.graphics.Canvas;
  import android.graphics.Color;
  import android.graphics.Matrix;
-@@ -79,6 +80,8 @@
+@@ -40,6 +41,7 @@
+ import android.util.Property;
+ import android.view.View;
+ 
++import com.android.launcher3.graphics.IconShape;
+ import com.android.launcher3.CellLayout;
+ import com.android.launcher3.DeviceProfile;
+ import com.android.launcher3.R;
+@@ -79,6 +81,8 @@
      /** Wide (2x1) folder: the background is a rounded rectangle spanning two cells. */
      private boolean mWide;
      int wideWidth;
@@ -339,7 +347,7 @@ diff -ruN a/src/com/android/launcher3/folder/PreviewBackground.java b/src/com/an
      private final RectF mWideRect = new RectF();
  
      private CellLayout mDrawingDelegate;
-@@ -164,6 +167,7 @@
+@@ -164,6 +168,7 @@
              wideWidth = Math.max(previewSize, availableSpaceX - 2 * margin);
              basePreviewOffsetX = (availableSpaceX - wideWidth) / 2;
          }
@@ -347,7 +355,7 @@ diff -ruN a/src/com/android/launcher3/folder/PreviewBackground.java b/src/com/an
          // basePreviewOffsetY = topPadding +
          //         (isInDrawer ? grid.allAppsFolderIconOffsetYPx : grid.folderIconOffsetYPx);
  
-@@ -193,19 +197,60 @@
+@@ -193,19 +198,60 @@
          float cx = basePreviewOffsetX + wideWidth / 2f;
          float cy = basePreviewOffsetY + previewSize / 2f;
          float halfW = wideWidth * scale / 2f - inset;
