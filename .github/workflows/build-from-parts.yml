@@ -78,6 +78,14 @@ jobs:
             patch -p1 -d src < "$p"
           done
 
+      - name: Terapkan patch folder 2x1 (opsional)
+        run: |
+          if [ -f ios-folder-2x1.patch ]; then
+            patch -p1 -d src < ios-folder-2x1.patch
+          else
+            echo "ios-folder-2x1.patch tidak ada di repo, dilewati"
+          fi
+
       - name: Atur varian ci (paket ch.deletescape.lawnchair.ci)
         working-directory: src
         run: |
