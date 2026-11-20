@@ -1,0 +1,409 @@
+diff -ruN a/res/values/folder_resize_strings.xml b/res/values/folder_resize_strings.xml
+--- a/res/values/folder_resize_strings.xml	1970-01-01 00:00:00.000000000 +0000
++++ b/res/values/folder_resize_strings.xml	2026-11-20 00:54:32.822063188 +0000
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="folder_resize_wide">Ubah ukuran: 2×1</string>
++    <string name="folder_resize_normal">Ubah ukuran: 1×1</string>
++    <string name="folder_resize_no_space">Tidak ada ruang kosong di sebelah folder</string>
++</resources>
+diff -ruN a/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java b/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java
+--- a/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java	2026-11-20 00:54:32.774086766 +0000
++++ b/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java	2026-11-20 00:54:32.816978293 +0000
+@@ -14,6 +14,7 @@
+     public static final int ENTER_INDEX = -3;
+ 
+     private float[] mTmpPoint = new float[2];
++    private float mWideWidth;
+ 
+     private float mAvailableSpace;
+     private float mRadius;
+@@ -31,12 +32,14 @@
+ 
+     public PreviewItemDrawingParams computePreviewItemDrawingParams(int index, int curNumItems,
+             PreviewItemDrawingParams params) {
+-        float totalScale = scaleForItem(curNumItems);
++        float totalScale = mWideWidth > 0 ? wideScale() : scaleForItem(curNumItems);
+         float transX;
+         float transY;
+         float overlayAlpha = 0;
+ 
+-        if (index == EXIT_INDEX) {
++        if (mWideWidth > 0) {
++            getWidePosition(index, curNumItems, mTmpPoint);
++        } else if (index == EXIT_INDEX) {
+             // 0 1 * <-- Exit position (row 0, col 2)
+             // 2 3
+             getGridPosition(0, 2, mTmpPoint);
+@@ -127,6 +130,43 @@
+ 
+     }
+ 
++    /** Wide (2x1) folder: icons are laid out in a single row. Pass 0 for the normal layout. */
++    public void setWide(float wideWidth) {
++        mWideWidth = wideWidth;
++    }
++
++    private float wideIconPx() {
++        float byHeight = mAvailableSpace * 0.62f;
++        float byWidth = mWideWidth * 0.9f / (MAX_NUM_ITEMS_IN_PREVIEW + 3 * 0.18f);
++        return Math.min(byHeight, byWidth);
++    }
++
++    private float wideScale() {
++        return wideIconPx() / mIconSize;
++    }
++
++    private void getWidePosition(int index, int curNumItems, float[] result) {
++        float size = wideIconPx();
++        float gap = size * 0.18f;
++        int n = Math.max(1, Math.min(curNumItems, MAX_NUM_ITEMS_IN_PREVIEW));
++        float total = n * size + (n - 1) * gap;
++        float start = (mWideWidth - total) / 2f;
++        float y = mAvailableSpace / 2f - size / 2f;
++
++        if (index >= MAX_NUM_ITEMS_IN_PREVIEW && index != EXIT_INDEX && index != ENTER_INDEX) {
++            // Items beyond the preview are animated to the center
++            result[0] = mWideWidth / 2f - size / 2f;
++            result[1] = y;
++            return;
++        }
++        int slot = (index == EXIT_INDEX || index == ENTER_INDEX) ? n : index;
++        if (mIsRtl && slot < n) {
++            slot = n - 1 - slot;
++        }
++        result[0] = start + slot * (size + gap);
++        result[1] = y;
++    }
++
+     public float scaleForItem(int numItems) {
+         // Scale is determined by the number of items in the preview.
+         final float scale;
+diff -ruN a/src/com/android/launcher3/folder/FolderResizeMenu.java b/src/com/android/launcher3/folder/FolderResizeMenu.java
+--- a/src/com/android/launcher3/folder/FolderResizeMenu.java	1970-01-01 00:00:00.000000000 +0000
++++ b/src/com/android/launcher3/folder/FolderResizeMenu.java	2026-11-20 00:54:32.820402128 +0000
+@@ -0,0 +1,131 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.launcher3.folder;
++
++import android.graphics.Rect;
++import android.graphics.RectF;
++import android.view.View;
++import android.view.ViewConfiguration;
++import android.widget.Toast;
++
++import com.android.launcher3.AbstractFloatingView;
++import com.android.launcher3.CellLayout;
++import com.android.launcher3.DropTarget.DragObject;
++import com.android.launcher3.FolderInfo;
++import com.android.launcher3.ItemInfo;
++import com.android.launcher3.Launcher;
++import com.android.launcher3.LauncherSettings;
++import com.android.launcher3.R;
++import com.android.launcher3.ShortcutAndWidgetContainer;
++import com.android.launcher3.dragndrop.DragOptions;
++import com.android.launcher3.views.OptionsPopupView;
++import com.android.launcher3.views.OptionsPopupView.OptionItem;
++
++import java.util.ArrayList;
++
++/**
++ * Long press menu for workspace folders that allows switching between 1x1 and wide (2x1).
++ */
++public final class FolderResizeMenu {
++
++    private FolderResizeMenu() { }
++
++    /**
++     * Returns the drag options for a long pressed workspace item. For folders on the workspace a
++     * resize menu is shown, and dragging the folder still works as usual.
++     */
++    public static DragOptions createDragOptions(Launcher launcher, View v, ItemInfo info) {
++        DragOptions options = new DragOptions();
++        if (v instanceof FolderIcon && info instanceof FolderInfo
++                && info.container == LauncherSettings.Favorites.CONTAINER_DESKTOP) {
++            showMenu(launcher, (FolderIcon) v, (FolderInfo) info);
++            final float threshold = ViewConfiguration.get(launcher).getScaledTouchSlop() * 2f;
++            options.preDragCondition = new DragOptions.PreDragCondition() {
++                @Override
++                public boolean shouldStartDrag(double distanceDragged) {
++                    return distanceDragged > threshold;
++                }
++
++                @Override
++                public void onPreDragStart(DragObject dragObject) { }
++
++                @Override
++                public void onPreDragEnd(DragObject dragObject, boolean dragStarted) {
++                    if (dragStarted) {
++                        AbstractFloatingView.closeOpenViews(launcher, true,
++                                AbstractFloatingView.TYPE_OPTIONS_POPUP);
++                    }
++                }
++            };
++        }
++        return options;
++    }
++
++    private static void showMenu(Launcher launcher, FolderIcon icon, FolderInfo info) {
++        final boolean wide = info.spanX > 1;
++        Rect rect = new Rect();
++        launcher.getDragLayer().getDescendantRectRelativeToSelf(icon, rect);
++
++        ArrayList<OptionItem> items = new ArrayList<>();
++        items.add(new OptionItem(
++                wide ? R.string.folder_resize_normal : R.string.folder_resize_wide,
++                R.drawable.ic_widget, 0,
++                v -> {
++                    resize(launcher, icon, info, wide ? 1 : 2);
++                    return true;
++                }));
++        OptionsPopupView.show(launcher, new RectF(rect), items);
++    }
++
++    private static void resize(Launcher launcher, FolderIcon icon, FolderInfo info,
++            int newSpanX) {
++        if (!(icon.getParent() instanceof ShortcutAndWidgetContainer)
++                || !(icon.getParent().getParent() instanceof CellLayout)) {
++            return;
++        }
++        CellLayout layout = (CellLayout) icon.getParent().getParent();
++        CellLayout.LayoutParams lp = (CellLayout.LayoutParams) icon.getLayoutParams();
++        int newX = lp.cellX;
++
++        layout.markCellsAsUnoccupiedForView(icon);
++        if (newSpanX > 1) {
++            boolean right = lp.cellX + 1 < layout.getCountX()
++                    && layout.isRegionVacant(lp.cellX + 1, lp.cellY, 1, 1);
++            boolean left = !right && lp.cellX - 1 >= 0
++                    && layout.isRegionVacant(lp.cellX - 1, lp.cellY, 1, 1);
++            if (!right && !left) {
++                layout.markCellsAsOccupiedForView(icon);
++                Toast.makeText(launcher, R.string.folder_resize_no_space,
++                        Toast.LENGTH_SHORT).show();
++                return;
++            }
++            if (left) {
++                newX = lp.cellX - 1;
++            }
++        }
++
++        lp.cellX = newX;
++        lp.tmpCellX = newX;
++        lp.cellHSpan = newSpanX;
++        layout.markCellsAsOccupiedForView(icon);
++
++        launcher.getModelWriter().modifyItemInDatabase(info, info.container, info.screenId,
++                newX, lp.cellY, newSpanX, 1);
++        icon.setLayoutParams(lp);
++        layout.requestLayout();
++        icon.invalidate();
++    }
++}
+diff -ruN a/src/com/android/launcher3/folder/PreviewBackground.java b/src/com/android/launcher3/folder/PreviewBackground.java
+--- a/src/com/android/launcher3/folder/PreviewBackground.java	2026-11-20 00:54:32.771401792 +0000
++++ b/src/com/android/launcher3/folder/PreviewBackground.java	2026-11-20 00:54:32.816866682 +0000
+@@ -34,6 +34,7 @@
+ import android.graphics.PorterDuffXfermode;
+ import android.graphics.RadialGradient;
+ import android.graphics.Rect;
++import android.graphics.RectF;
+ import android.graphics.Region;
+ import android.graphics.Shader;
+ import android.util.Property;
+@@ -75,6 +76,11 @@
+     int basePreviewOffsetX;
+     int basePreviewOffsetY;
+ 
++    /** Wide (2x1) folder: the background is a rounded rectangle spanning two cells. */
++    private boolean mWide;
++    int wideWidth;
++    private final RectF mWideRect = new RectF();
++
+     private CellLayout mDrawingDelegate;
+     public int delegateCellX;
+     public int delegateCellY;
+@@ -151,6 +157,13 @@
+ 
+         basePreviewOffsetX = (availableSpaceX - previewSize) / 2;
+         basePreviewOffsetY = topPadding + grid.folderIconOffsetYPx;
++
++        wideWidth = previewSize;
++        if (mWide) {
++            int margin = Math.max(0, (availableSpaceX / 2 - previewSize) / 2);
++            wideWidth = Math.max(previewSize, availableSpaceX - 2 * margin);
++            basePreviewOffsetX = (availableSpaceX - wideWidth) / 2;
++        }
+         // basePreviewOffsetY = topPadding +
+         //         (isInDrawer ? grid.allAppsFolderIconOffsetYPx : grid.folderIconOffsetYPx);
+ 
+@@ -168,10 +181,30 @@
+         invalidate();
+     }
+ 
++    public void setWide(boolean wide) {
++        mWide = wide;
++    }
++
++    public boolean isWide() {
++        return mWide;
++    }
++
++    private void updateWideRect(float scale, float inset) {
++        float cx = basePreviewOffsetX + wideWidth / 2f;
++        float cy = basePreviewOffsetY + previewSize / 2f;
++        float halfW = wideWidth * scale / 2f - inset;
++        float halfH = previewSize * scale / 2f - inset;
++        mWideRect.set(cx - halfW, cy - halfH, cx + halfW, cy + halfH);
++    }
++
++    private float getWideCornerRadius() {
++        return previewSize * 0.3f;
++    }
++
+     void getBounds(Rect outBounds) {
+         int top = basePreviewOffsetY;
+         int left = basePreviewOffsetX;
+-        int right = left + previewSize;
++        int right = left + (mWide ? wideWidth : previewSize);
+         int bottom = top + previewSize;
+         outBounds.set(left, top, right, bottom);
+     }
+@@ -232,12 +265,18 @@
+         mPaint.setStyle(Paint.Style.FILL);
+         mPaint.setColor(getBgColor());
+ 
++        if (mWide) {
++            updateWideRect(mScale, 0);
++            float r = getWideCornerRadius();
++            canvas.drawRoundRect(mWideRect, r, r, mPaint);
++            return;
++        }
+         getShape().drawShape(canvas, getOffsetX(), getOffsetY(), getScaledRadius(), mPaint);
+         drawShadow(canvas);
+     }
+ 
+     public void drawShadow(Canvas canvas) {
+-        if (mShadowShader == null) {
++        if (mWide || mShadowShader == null) {
+             return;
+         }
+ 
+@@ -312,6 +351,12 @@
+         mPaint.setStrokeWidth(mStrokeWidth);
+ 
+         float inset = 1f;
++        if (mWide) {
++            updateWideRect(mScale, inset);
++            float r = getWideCornerRadius();
++            canvas.drawRoundRect(mWideRect, r, r, mPaint);
++            return;
++        }
+         getShape().drawShape(canvas,
+                 getOffsetX() + inset, getOffsetY() + inset, getScaledRadius() - inset, mPaint);
+     }
+@@ -322,13 +367,25 @@
+ 
+         mPaint.setStyle(Paint.Style.FILL);
+         mPaint.setColor(Color.argb(160, 245, 245, 245));
+-        getShape().drawShape(canvas, getOffsetX(), getOffsetY(), getScaledRadius(), mPaint);
++        if (mWide) {
++            updateWideRect(mScale, 0);
++            float r = getWideCornerRadius();
++            canvas.drawRoundRect(mWideRect, r, r, mPaint);
++        } else {
++            getShape().drawShape(canvas, getOffsetX(), getOffsetY(), getScaledRadius(), mPaint);
++        }
+ 
+         mScale = originalScale;
+     }
+ 
+     public Path getClipPath() {
+         mPath.reset();
++        if (mWide) {
++            updateWideRect(mScale, 0);
++            float r = getWideCornerRadius();
++            mPath.addRoundRect(mWideRect, r, r, Path.Direction.CW);
++            return mPath;
++        }
+         getShape().addToPath(mPath, getOffsetX(), getOffsetY(), getScaledRadius());
+         return mPath;
+     }
+diff -ruN a/src/com/android/launcher3/folder/PreviewItemManager.java b/src/com/android/launcher3/folder/PreviewItemManager.java
+--- a/src/com/android/launcher3/folder/PreviewItemManager.java	2026-11-20 00:54:32.776633782 +0000
++++ b/src/com/android/launcher3/folder/PreviewItemManager.java	2026-11-20 00:54:32.817046940 +0000
+@@ -33,6 +33,7 @@
+ import com.android.launcher3.BubbleTextView;
+ import com.android.launcher3.DeviceProfile;
+ import com.android.launcher3.WorkspaceItemInfo;
++import com.android.launcher3.FolderInfo;
+ import com.android.launcher3.Utilities;
+ 
+ import java.util.ArrayList;
+@@ -108,10 +109,14 @@
+             mTotalWidth = totalSize;
+             mPrevTopPadding = mIcon.getPaddingTop();
+ 
++            Object tag = mIcon.getTag();
++            boolean wide = tag instanceof FolderInfo && ((FolderInfo) tag).spanX > 1;
++            mIcon.mBackground.setWide(wide);
+             mIcon.mBackground.setup(mIcon.mLauncher, mIcon.mLauncher, mIcon, mTotalWidth,
+                     mIcon.getPaddingTop());
+             mIcon.mPreviewLayoutRule.init(mIcon.mBackground.previewSize, mIntrinsicIconSize,
+                     Utilities.isRtl(mIcon.getResources()));
++            mIcon.mPreviewLayoutRule.setWide(wide ? mIcon.mBackground.wideWidth : 0);
+ 
+             updatePreviewItems(false);
+         }
+diff -ruN a/src/com/android/launcher3/model/LoaderTask.java b/src/com/android/launcher3/model/LoaderTask.java
+--- a/src/com/android/launcher3/model/LoaderTask.java	2026-11-20 00:54:32.765082403 +0000
++++ b/src/com/android/launcher3/model/LoaderTask.java	2026-11-20 00:54:32.816526777 +0000
+@@ -582,7 +582,10 @@
+ 
+                             // Do not trim the folder label, as is was set by the user.
+                             folderInfo.title = c.getString(c.titleIndex);
+-                            folderInfo.spanX = 1;
++                            // Folders are 1x1, or wide (2x1) on the workspace
++                            folderInfo.spanX = (folderInfo.container
++                                    == LauncherSettings.Favorites.CONTAINER_DESKTOP
++                                    && c.getInt(spanXIndex) == 2) ? 2 : 1;
+                             folderInfo.spanY = 1;
+                             folderInfo.options = c.getInt(optionsIndex);
+ 
+diff -ruN a/src/com/android/launcher3/touch/ItemLongClickListener.java b/src/com/android/launcher3/touch/ItemLongClickListener.java
+--- a/src/com/android/launcher3/touch/ItemLongClickListener.java	2026-11-20 00:54:32.767741883 +0000
++++ b/src/com/android/launcher3/touch/ItemLongClickListener.java	2026-11-20 00:54:32.816698217 +0000
+@@ -31,6 +31,7 @@
+ import com.android.launcher3.Launcher;
+ import com.android.launcher3.dragndrop.DragController;
+ import com.android.launcher3.dragndrop.DragOptions;
++import com.android.launcher3.folder.FolderResizeMenu;
+ import com.android.launcher3.folder.Folder;
+ 
+ /**
+@@ -51,7 +52,9 @@
+         if (!(v.getTag() instanceof ItemInfo)) return false;
+ 
+         launcher.setWaitingForResult(null);
+-        beginDrag(v, launcher, (ItemInfo) v.getTag(), new DragOptions());
++        ItemInfo itemInfo = (ItemInfo) v.getTag();
++        beginDrag(v, launcher, itemInfo,
++                FolderResizeMenu.createDragOptions(launcher, v, itemInfo));
+         return true;
+     }
+ 
