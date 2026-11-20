@@ -82,6 +82,9 @@ jobs:
         run: |
           if [ -f ios-folder-2x1.patch ]; then
             patch -p1 -d src < ios-folder-2x1.patch
+            if [ -f ios-folder-2x1-v2.patch ]; then
+              patch -p1 -d src < ios-folder-2x1-v2.patch
+            fi
           else
             echo "ios-folder-2x1.patch tidak ada di repo, dilewati"
           fi
