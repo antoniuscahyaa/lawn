@@ -82,8 +82,8 @@ diff -ruN a/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java b/
          final float scale;
 diff -ruN a/src/com/android/launcher3/folder/FolderResizeMenu.java b/src/com/android/launcher3/folder/FolderResizeMenu.java
 --- a/src/com/android/launcher3/folder/FolderResizeMenu.java	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/com/android/launcher3/folder/FolderResizeMenu.java	2026-11-20 01:08:08.981831743 +0000
-@@ -0,0 +1,136 @@
++++ b/src/com/android/launcher3/folder/FolderResizeMenu.java	2026-11-20 05:54:48.360376223 +0000
+@@ -0,0 +1,128 @@
 +/*
 + * Copyright (C) 2026 The Android Open Source Project
 + *
@@ -107,7 +107,6 @@ diff -ruN a/src/com/android/launcher3/folder/FolderResizeMenu.java b/src/com/and
 +import android.view.ViewConfiguration;
 +import android.widget.Toast;
 +
-+import com.android.launcher3.AbstractFloatingView;
 +import com.android.launcher3.CellLayout;
 +import com.android.launcher3.DropTarget.DragObject;
 +import com.android.launcher3.FolderInfo;
@@ -116,6 +115,7 @@ diff -ruN a/src/com/android/launcher3/folder/FolderResizeMenu.java b/src/com/and
 +import com.android.launcher3.LauncherSettings;
 +import com.android.launcher3.R;
 +import com.android.launcher3.ShortcutAndWidgetContainer;
++import com.android.launcher3.dragndrop.DragController;
 +import com.android.launcher3.dragndrop.DragOptions;
 +import com.android.launcher3.views.OptionsPopupView;
 +import com.android.launcher3.views.OptionsPopupView.OptionItem;
@@ -130,37 +130,29 @@ diff -ruN a/src/com/android/launcher3/folder/FolderResizeMenu.java b/src/com/and
 +    private FolderResizeMenu() { }
 +
 +    /**
-+     * Returns the drag options for a long pressed workspace item. For folders on the workspace a
-+     * resize menu is shown, and dragging the folder still works as usual.
++     * Returns the drag options for a long pressed workspace item. Folders on the workspace keep
++     * the regular drag behaviour; if the long press ends without moving the folder, a resize menu
++     * is shown next to it.
 +     */
 +    public static DragOptions createDragOptions(Launcher launcher, View v, ItemInfo info) {
 +        DragOptions options = new DragOptions();
 +        if (v instanceof FolderIcon && info instanceof FolderInfo
 +                && info.container == LauncherSettings.Favorites.CONTAINER_DESKTOP) {
-+            showMenu(launcher, (FolderIcon) v, (FolderInfo) info);
-+            final float threshold = ViewConfiguration.get(launcher).getScaledTouchSlop() * 2f;
-+            options.preDragCondition = new DragOptions.PreDragCondition() {
++            final DragController controller = launcher.getDragController();
++            final float slop = ViewConfiguration.get(launcher).getScaledTouchSlop() * 2f;
++            controller.addDragListener(new DragController.DragListener() {
 +                @Override
-+                public boolean shouldStartDrag(double distanceDragged) {
-+                    return distanceDragged > threshold;
-+                }
++                public void onDragStart(DragObject dragObject, DragOptions dragOptions) { }
 +
 +                @Override
-+                public void onPreDragStart(DragObject dragObject) { }
-+
-+                @Override
-+                public void onPreDragEnd(DragObject dragObject, boolean dragStarted) {
-+                    if (dragStarted) {
-+                        AbstractFloatingView.closeOpenViews(launcher, true,
-+                                AbstractFloatingView.TYPE_OPTIONS_POPUP);
-+                    } else {
-+                        // The drag never started (finger released): show the folder again,
-+                        // it was hidden when the long press began.
-+                        v.setVisibility(View.VISIBLE);
-+                        v.invalidate();
++                public void onDragEnd() {
++                    controller.removeDragListener(this);
++                    if (controller.getDistanceDragged() <= slop && v.isAttachedToWindow()
++                            && v.getVisibility() == View.VISIBLE) {
++                        showMenu(launcher, (FolderIcon) v, (FolderInfo) info);
 +                    }
 +                }
-+            };
++            });
 +        }
 +        return options;
 +    }
