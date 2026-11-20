@@ -82,8 +82,8 @@ diff -ruN a/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java b/
          final float scale;
 diff -ruN a/src/com/android/launcher3/folder/FolderResizeMenu.java b/src/com/android/launcher3/folder/FolderResizeMenu.java
 --- a/src/com/android/launcher3/folder/FolderResizeMenu.java	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/com/android/launcher3/folder/FolderResizeMenu.java	2026-11-20 00:54:32.820402128 +0000
-@@ -0,0 +1,131 @@
++++ b/src/com/android/launcher3/folder/FolderResizeMenu.java	2026-11-20 01:08:08.981831743 +0000
+@@ -0,0 +1,136 @@
 +/*
 + * Copyright (C) 2026 The Android Open Source Project
 + *
@@ -153,6 +153,11 @@ diff -ruN a/src/com/android/launcher3/folder/FolderResizeMenu.java b/src/com/and
 +                    if (dragStarted) {
 +                        AbstractFloatingView.closeOpenViews(launcher, true,
 +                                AbstractFloatingView.TYPE_OPTIONS_POPUP);
++                    } else {
++                        // The drag never started (finger released): show the folder again,
++                        // it was hidden when the long press began.
++                        v.setVisibility(View.VISIBLE);
++                        v.invalidate();
 +                    }
 +                }
 +            };
