@@ -1,20 +1,17 @@
 diff -ruN a/res/values/folder_resize_strings.xml b/res/values/folder_resize_strings.xml
---- a/res/values/folder_resize_strings.xml	2026-11-21 09:09:55.727350551 +0000
-+++ b/res/values/folder_resize_strings.xml	2026-11-21 14:00:28.622406584 +0000
-@@ -10,4 +10,10 @@
+--- a/res/values/folder_resize_strings.xml	2026-11-21 23:45:01.286017128 +0000
++++ b/res/values/folder_resize_strings.xml	2026-11-21 23:45:01.324520561 +0000
+@@ -10,4 +10,7 @@
      <string name="folder_resize_wide3">Ubah ukuran: 3×1</string>
      <string name="folder_main_icons">Pilih ikon utama (2)</string>
      <string name="folder_main_icons_title">Pilih dua ikon utama</string>
-+    <string name="folder_resize_wide22">Ubah ukuran: 2×2</string>
-+    <string name="folder_main_icons3">Pilih ikon utama (3)</string>
-+    <string name="folder_main_icons3_title">Pilih tiga ikon utama</string>
 +    <string name="folder_group_auto">Susunan grup: Otomatis</string>
 +    <string name="folder_group_grid">Susunan grup: Grid</string>
 +    <string name="folder_group_diamond">Susunan grup: Belah ketupat</string>
  </resources>
 diff -ruN a/src/com/android/launcher3/FolderInfo.java b/src/com/android/launcher3/FolderInfo.java
---- a/src/com/android/launcher3/FolderInfo.java	2026-11-21 09:09:55.695777225 +0000
-+++ b/src/com/android/launcher3/FolderInfo.java	2026-11-21 09:10:23.244340883 +0000
+--- a/src/com/android/launcher3/FolderInfo.java	2026-11-21 23:45:01.273568670 +0000
++++ b/src/com/android/launcher3/FolderInfo.java	2026-11-21 23:45:01.323781379 +0000
 @@ -73,6 +73,12 @@
      /** The id of the wide folder's main icon is stored in the upper bits of the options. */
      private static final int WIDE_MAIN_ITEM_SHIFT = 8;
@@ -28,18 +25,10 @@ diff -ruN a/src/com/android/launcher3/FolderInfo.java b/src/com/android/launcher
      public int options;
  
      /**
-@@ -172,19 +178,39 @@
-         }
+@@ -221,6 +227,18 @@
+         return result;
      }
  
-+    /** Number of big (normal size) icons shown by the folder: 0 for a regular 1x1 folder. */
-+    public int getBigIconCount() {
-+        if (spanY > 1) {
-+            return 3;
-+        }
-+        return spanX > 1 ? spanX - 1 : 0;
-+    }
-+
 +    public int getGroupLayoutMode() {
 +        return (options >>> GROUP_LAYOUT_SHIFT) & 0x3;
 +    }
@@ -52,46 +41,12 @@ diff -ruN a/src/com/android/launcher3/FolderInfo.java b/src/com/android/launcher
 +        }
 +    }
 +
-     /**
--     * Id of the app chosen for a main icon slot of a wide folder (low 12 bits of the item id),
--     * or 0 if none. Slot 0 uses bits 8-19 of the options and slot 1 bits 20-31.
-+     * Id of the app chosen for a main icon slot of a wide folder (low 8 bits of the item id),
-+     * or 0 if none. The slots use bits 8-15, 16-23 and 24-31 of the options.
-      */
-     public int getWideMainItemId(int slot) {
--        return (options >>> (WIDE_MAIN_ITEM_SHIFT + 12 * slot)) & 0xFFF;
-+        return (options >>> (WIDE_MAIN_ITEM_SHIFT + 8 * slot)) & 0xFF;
+     public boolean hasOption(int optionFlag) {
+         return (options & optionFlag) != 0;
      }
- 
-     public void setWideMainItemIds(ModelWriter writer, int... itemIds) {
-         int oldOptions = options;
-         int newOptions = options & ((1 << WIDE_MAIN_ITEM_SHIFT) - 1);
--        for (int i = 0; i < Math.min(itemIds.length, 2); i++) {
--            newOptions |= (itemIds[i] & 0xFFF) << (WIDE_MAIN_ITEM_SHIFT + 12 * i);
-+        for (int i = 0; i < Math.min(itemIds.length, 3); i++) {
-+            newOptions |= (itemIds[i] & 0xFF) << (WIDE_MAIN_ITEM_SHIFT + 8 * i);
-         }
-         options = newOptions;
-         if (writer != null && oldOptions != options) {
-@@ -198,13 +224,13 @@
-      */
-     public ArrayList<WorkspaceItemInfo> getWideMainItems(int count) {
-         ArrayList<WorkspaceItemInfo> result = new ArrayList<>();
--        for (int slot = 0; slot < Math.min(count, 2); slot++) {
-+        for (int slot = 0; slot < Math.min(count, 3); slot++) {
-             int id = getWideMainItemId(slot);
-             if (id == 0) {
-                 continue;
-             }
-             for (WorkspaceItemInfo item : contents) {
--                if ((item.id & 0xFFF) == id && !result.contains(item)) {
-+                if ((item.id & 0xFF) == id && !result.contains(item)) {
-                     result.add(item);
-                     break;
-                 }
 diff -ruN a/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java b/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java
---- a/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java	2026-11-21 09:09:55.715326304 +0000
-+++ b/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java	2026-11-21 09:10:50.377694934 +0000
+--- a/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java	2026-11-21 23:45:01.278834732 +0000
++++ b/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java	2026-11-21 23:45:01.324114635 +0000
 @@ -1,5 +1,7 @@
  package com.android.launcher3.folder;
  
@@ -100,108 +55,18 @@ diff -ruN a/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java b/
  public class ClippedFolderIconLayoutRule {
  
      public static final int MAX_NUM_ITEMS_IN_PREVIEW = 4;
-@@ -18,6 +20,8 @@
-     private float mWideHeight;
-     private boolean mWideCircle;
-     private int mWideBigCount = 1;
-+    private int mWideRows = 1;
-+    private float mWideCenterY;
- 
-     private float mAvailableSpace;
-     private float mRadius;
-@@ -141,7 +145,9 @@
-      *                     false for a regular 2x2 grid.
-      */
-     public void setWide(float wideWidth, float wideHeight, boolean circleLayout,
--            int bigCount) {
-+            int bigCount, int rows, float centerY) {
-+        mWideRows = rows;
-+        mWideCenterY = centerY;
-         mWideBigCount = Math.max(1, bigCount);
-         mWideWidth = wideWidth;
-         mWideHeight = wideHeight;
-@@ -184,6 +190,88 @@
+@@ -184,6 +186,18 @@
          return new float[] {bigPx, s, d, gap, groupSize, pad};
      }
  
-+    /** Two row folder: three big icons (top left, top right, bottom left) and the group. */
-+    private float getTallItem(int index, float[] result) {
-+        final float w = mWideWidth;
-+        final float h = mWideHeight;
-+        final float cy = mWideCenterY;
-+        final float bigPx = Math.min(mIconSize, Math.min(w / 2f, h / 2f) * 0.84f);
-+        final float[] cxs = {w * 0.25f, w * 0.75f};
-+        final float[] cys = {cy - h * 0.25f, cy + h * 0.25f};
-+
-+        float size;
-+        float x;
-+        float y;
-+        if (index >= 0 && index < 3) {
-+            size = bigPx;
-+            x = cxs[index % 2] - size / 2f;
-+            y = cys[index / 2] - size / 2f;
-+        } else {
-+            int slot = (index < 0 || index >= 7) ? 3 : index - 3;
-+            final float gx = cxs[1];
-+            final float gy = cys[1];
-+            if (mWideCircle) {
-+                final float s = bigPx * 0.34f;
-+                final float d = bigPx * 0.318f;
-+                size = s;
-+                switch (slot) {
-+                    case 0:
-+                        x = gx - s / 2f;
-+                        y = gy - d - s / 2f;
-+                        break;
-+                    case 1:
-+                        x = gx - d - s / 2f;
-+                        y = gy - s / 2f;
-+                        break;
-+                    case 2:
-+                        x = gx + d - s / 2f;
-+                        y = gy - s / 2f;
-+                        break;
-+                    default:
-+                        x = gx - s / 2f;
-+                        y = gy + d - s / 2f;
-+                        break;
-+                }
-+            } else {
-+                final float s = bigPx * 0.43f;
-+                final float gap = bigPx * 0.09f;
-+                size = s;
-+                final float half = s + gap / 2f;
-+                x = gx - half + (slot % 2) * (s + gap);
-+                y = gy - half + (slot / 2) * (s + gap);
-+            }
-+        }
-+        if (mIsRtl) {
-+            x = w - x - size;
-+        }
-+        result[0] = x;
-+        result[1] = y;
-+        return size / mIconSize;
-+    }
-+
 +    /** Bounds of the small group (relative to the preview origin), used for the +N badge. */
 +    public void getWideGroupBounds(RectF out) {
-+        final float w = mWideWidth;
-+        float left;
-+        float top;
-+        float size;
-+        if (mWideRows > 1) {
-+            final float h = mWideHeight;
-+            size = Math.min(mIconSize, Math.min(w / 2f, h / 2f) * 0.84f);
-+            left = w * 0.75f - size / 2f;
-+            top = mWideCenterY + h * 0.25f - size / 2f;
-+        } else {
-+            float[] m = wideMetrics();
-+            size = m[4];
-+            left = m[5] + mWideBigCount * (m[0] + m[5]);
-+            top = mWideCenterY - size / 2f;
-+        }
++        float[] m = wideMetrics();
++        float size = m[4];
++        float left = m[5] + mWideBigCount * (m[0] + m[5]);
++        float top = mAvailableSpace / 2f - size / 2f;
 +        if (mIsRtl) {
-+            left = w - left - size;
++            left = mWideWidth - left - size;
 +        }
 +        out.set(left, top, left + size, top + size);
 +    }
@@ -209,28 +74,9 @@ diff -ruN a/src/com/android/launcher3/folder/ClippedFolderIconLayoutRule.java b/
      /** X positions of the separators after each big icon (mirrored for RTL). */
      public float[] getWideSeparatorXs() {
          float[] m = wideMetrics();
-@@ -197,6 +285,9 @@
- 
-     /** Fills {@param result} with the top left position of the item and returns its scale. */
-     private float getWideItem(int index, int curNumItems, float[] result) {
-+        if (mWideRows > 1) {
-+            return getTallItem(index, result);
-+        }
-         final float w = mWideWidth;
-         final int n = mWideBigCount;
-         float[] m = wideMetrics();
-@@ -206,7 +297,7 @@
-         final float gap = m[3];
-         final float groupSize = m[4];
-         final float pad = m[5];
--        final float cy = mAvailableSpace / 2f;
-+        final float cy = mWideCenterY;
- 
-         float size;
-         float x;
 diff -ruN a/src/com/android/launcher3/folder/FolderIcon.java b/src/com/android/launcher3/folder/FolderIcon.java
---- a/src/com/android/launcher3/folder/FolderIcon.java	2026-11-21 09:09:55.703673322 +0000
-+++ b/src/com/android/launcher3/folder/FolderIcon.java	2026-11-21 09:10:50.378336591 +0000
+--- a/src/com/android/launcher3/folder/FolderIcon.java	2026-11-21 23:45:01.276050119 +0000
++++ b/src/com/android/launcher3/folder/FolderIcon.java	2026-11-21 23:45:01.324330042 +0000
 @@ -25,8 +25,10 @@
  import android.content.Context;
  import android.content.Intent;
@@ -242,43 +88,13 @@ diff -ruN a/src/com/android/launcher3/folder/FolderIcon.java b/src/com/android/l
  import android.graphics.drawable.Drawable;
  import android.util.AttributeSet;
  import android.util.Property;
-@@ -545,10 +547,68 @@
- 
-     /** Wide folders preview one big icon plus a group of four; normal folders show four. */
-     public int getMaxPreviewItems() {
--        return isWide() ? MAX_NUM_ITEMS_IN_PREVIEW + mInfo.spanX - 1 : MAX_NUM_ITEMS_IN_PREVIEW;
-+        return isWide() ? MAX_NUM_ITEMS_IN_PREVIEW + mInfo.getBigIconCount()
-+                : MAX_NUM_ITEMS_IN_PREVIEW;
+@@ -549,6 +551,39 @@
      }
  
      private float mTouchX;
-+    private float mTouchY;
-+    private boolean mTallLabelApplied;
 +    private Paint mBadgePaint;
 +    private Paint mBadgeTextPaint;
 +    private final RectF mBadgeRect = new RectF();
-+
-+    /** True for a wide folder spanning two rows (2x2). */
-+    public boolean isTall() {
-+        return mInfo != null && mInfo.spanY > 1;
-+    }
-+
-+    private void applyTallLabelMargin(int height) {
-+        if (mFolderName == null) {
-+            return;
-+        }
-+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) mFolderName.getLayoutParams();
-+        DeviceProfile grid = mLauncher.getDeviceProfile();
-+        if (isTall() && height > 0) {
-+            // The folder name goes below the tall background
-+            lp.topMargin = Math.max(grid.iconSizePx,
-+                    height - PreviewBackground.tallLabelHeight(grid));
-+            mTallLabelApplied = true;
-+        } else if (mTallLabelApplied) {
-+            lp.topMargin = grid.iconSizePx + grid.iconDrawablePaddingPx;
-+            mTallLabelApplied = false;
-+        }
-+    }
 +
 +    /** Draws "+N" at the corner of the small group when more apps do not fit the preview. */
 +    private void drawWideExtraBadge(Canvas canvas) {
@@ -312,45 +128,7 @@ diff -ruN a/src/com/android/launcher3/folder/FolderIcon.java b/src/com/android/l
  
      /**
       * For wide folders: launches the first app if the last touch was on the big icon.
-@@ -562,19 +622,31 @@
-         mBackground.getBounds(bounds);
-         boolean rtl = Utilities.isRtl(getResources());
-         float rel = mTouchX - bounds.left;
--        float[] separators = mPreviewLayoutRule.getWideSeparatorXs();
-         int slot = -1;
--        for (int k = 0; k < separators.length; k++) {
--            if (rtl ? rel >= separators[k] : rel <= separators[k]) {
--                slot = k;
--                break;
-+        int count = mInfo.getBigIconCount();
-+        if (isTall()) {
-+            // 2x2: three big icons (top left, top right, bottom left) and the group
-+            int col = rel < bounds.width() / 2f ? 0 : 1;
-+            if (rtl) {
-+                col = 1 - col;
-+            }
-+            int row = (mTouchY - bounds.top) < bounds.height() / 2f ? 0 : 1;
-+            int cell = row * 2 + col;
-+            slot = cell < 3 ? cell : -1;
-+        } else {
-+            float[] separators = mPreviewLayoutRule.getWideSeparatorXs();
-+            for (int k = 0; k < separators.length; k++) {
-+                if (rtl ? rel >= separators[k] : rel <= separators[k]) {
-+                    slot = k;
-+                    break;
-+                }
-             }
-         }
-         if (slot < 0) {
-             // The small group: open the folder
-             return false;
-         }
--        List<WorkspaceItemInfo> mains = mInfo.getWideMainItems(separators.length);
-+        List<WorkspaceItemInfo> mains = mInfo.getWideMainItems(count);
-         if (slot >= mains.size()) {
-             return false;
-         }
-@@ -657,6 +729,7 @@
+@@ -657,6 +692,7 @@
              mBackground.drawBackgroundStroke(canvas);
          }
  
@@ -358,328 +136,40 @@ diff -ruN a/src/com/android/launcher3/folder/FolderIcon.java b/src/com/android/l
          drawDot(canvas);
      }
  
-@@ -723,7 +796,7 @@
-             return result;
-         }
-         List<BubbleTextView> all = mFolder.getItemsOnPage(0);
--        for (WorkspaceItemInfo main : mInfo.getWideMainItems(mInfo.spanX - 1)) {
-+        for (WorkspaceItemInfo main : mInfo.getWideMainItems(mInfo.getBigIconCount())) {
-             for (BubbleTextView view : all) {
-                 if (view.getTag() == main) {
-                     result.add(view);
-@@ -767,6 +840,7 @@
- 
-     @Override
-     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-+        applyTallLabelMargin(MeasureSpec.getSize(heightMeasureSpec));
-         if (!mInfo.useIconMode(mLauncher) && isInAppDrawer()) {
-             DeviceProfile grid = mLauncher.getDeviceProfile();
-             int drawablePadding = grid.allAppsIconDrawablePaddingPx;
-@@ -835,6 +909,7 @@
-         // isPressed() on an ACTION_UP
-         if (event.getAction() == MotionEvent.ACTION_DOWN) {
-             mTouchX = event.getX();
-+            mTouchY = event.getY();
-         }
-         boolean result = super.onTouchEvent(event);
- 
-diff -ruN a/src/com/android/launcher3/folder/FolderIconPreviewVerifier.java b/src/com/android/launcher3/folder/FolderIconPreviewVerifier.java
---- a/src/com/android/launcher3/folder/FolderIconPreviewVerifier.java	2026-11-21 09:09:55.707682667 +0000
-+++ b/src/com/android/launcher3/folder/FolderIconPreviewVerifier.java	2026-11-21 09:10:23.244435405 +0000
-@@ -53,7 +53,7 @@
- 
-     public void setFolderInfo(FolderInfo info) {
-         mWide = info.spanX > 1;
--        mWideMax = MAX_NUM_ITEMS_IN_PREVIEW + Math.max(0, info.spanX - 1);
-+        mWideMax = MAX_NUM_ITEMS_IN_PREVIEW + info.getBigIconCount();
-         int numItemsInFolder = info.contents.size();
-         if (numItemsInFolder != mNumItemsInFolder) {
-             FolderPagedView.calculateGridSize(numItemsInFolder, 0, 0, mMaxGridCountX,
 diff -ruN a/src/com/android/launcher3/folder/FolderResizeMenu.java b/src/com/android/launcher3/folder/FolderResizeMenu.java
---- a/src/com/android/launcher3/folder/FolderResizeMenu.java	2026-11-21 09:09:55.723018523 +0000
-+++ b/src/com/android/launcher3/folder/FolderResizeMenu.java	2026-11-21 14:00:28.622092987 +0000
-@@ -74,43 +74,67 @@
-     }
- 
-     private static void showMenu(Launcher launcher, FolderIcon icon, FolderInfo info) {
--        final int span = Math.max(1, info.spanX);
-+        final int spanX = Math.max(1, info.spanX);
-+        final int spanY = Math.max(1, info.spanY);
-         Rect rect = new Rect();
-         launcher.getDragLayer().getDescendantRectRelativeToSelf(icon, rect);
- 
-+        // {spanX, spanY, label}
-+        final int[][] sizes = {
-+                {1, 1, R.string.folder_resize_normal},
-+                {2, 1, R.string.folder_resize_wide},
-+                {3, 1, R.string.folder_resize_wide3},
-+                {2, 2, R.string.folder_resize_wide22}};
-+
-         ArrayList<OptionItem> items = new ArrayList<>();
--        final int[] sizeLabels = {
--                R.string.folder_resize_normal,
--                R.string.folder_resize_wide,
--                R.string.folder_resize_wide3};
--        for (int target = 1; target <= 3; target++) {
--            if (target == span) {
-+        for (int[] size : sizes) {
-+            if (size[0] == spanX && size[1] == spanY) {
-                 continue;
-             }
--            final int newSpan = target;
--            items.add(new OptionItem(sizeLabels[target - 1], R.drawable.ic_widget, 0,
-+            final int newX = size[0];
-+            final int newY = size[1];
-+            items.add(new OptionItem(size[2], R.drawable.ic_widget, 0,
-                     v -> {
--                        resize(launcher, icon, info, newSpan);
-+                        resize(launcher, icon, info, newX, newY);
-                         return true;
-                     }));
-         }
--        if (span > 1) {
--            items.add(new OptionItem(span > 2 ? R.string.folder_main_icons : R.string.folder_main_icon,
-+        if (spanX > 1) {
-+            final int bigCount = info.getBigIconCount();
-+            items.add(new OptionItem(
-+                    bigCount >= 3 ? R.string.folder_main_icons3
-+                            : (bigCount == 2 ? R.string.folder_main_icons
-+                                    : R.string.folder_main_icon),
-                     R.drawable.ic_widget, 0,
-                     v -> {
+--- a/src/com/android/launcher3/folder/FolderResizeMenu.java	2026-11-21 23:45:01.283598698 +0000
++++ b/src/com/android/launcher3/folder/FolderResizeMenu.java	2026-11-21 23:45:01.324443492 +0000
+@@ -101,6 +101,18 @@
                          showMainIconChooser(launcher, icon, info);
                          return true;
                      }));
--            final boolean separatorOn = info.hasOption(FolderInfo.FLAG_WIDE_SEPARATOR);
 +            final int mode = info.getGroupLayoutMode();
-             items.add(new OptionItem(
--                    separatorOn ? R.string.folder_separator_on : R.string.folder_separator_off,
++            items.add(new OptionItem(
 +                    mode == FolderInfo.GROUP_LAYOUT_GRID ? R.string.folder_group_grid
 +                            : (mode == FolderInfo.GROUP_LAYOUT_DIAMOND
 +                                    ? R.string.folder_group_diamond
 +                                    : R.string.folder_group_auto),
-                     R.drawable.ic_widget, 0,
-                     v -> {
--                        info.setOption(FolderInfo.FLAG_WIDE_SEPARATOR, !separatorOn,
--                                launcher.getModelWriter());
++                    R.drawable.ic_widget, 0,
++                    v -> {
 +                        info.setGroupLayoutMode((mode + 1) % 3, launcher.getModelWriter());
-                         icon.invalidate();
-                         return true;
-                     }));
-+            if (spanY == 1) {
-+                final boolean separatorOn = info.hasOption(FolderInfo.FLAG_WIDE_SEPARATOR);
-+                items.add(new OptionItem(
-+                        separatorOn ? R.string.folder_separator_on
-+                                : R.string.folder_separator_off,
-+                        R.drawable.ic_widget, 0,
-+                        v -> {
-+                            info.setOption(FolderInfo.FLAG_WIDE_SEPARATOR, !separatorOn,
-+                                    launcher.getModelWriter());
-+                            icon.invalidate();
-+                            return true;
-+                        }));
-+            }
-         }
-         OptionsPopupView.show(launcher, new RectF(rect), items);
-     }
-@@ -120,7 +144,7 @@
-         if (info.contents.isEmpty()) {
-             return;
-         }
--        final int bigCount = Math.max(1, Math.min(2, info.spanX - 1));
-+        final int bigCount = Math.max(1, Math.min(3, info.getBigIconCount()));
-         final int size = info.contents.size();
-         CharSequence[] titles = new CharSequence[size];
-         boolean[] checked = new boolean[size];
-@@ -147,12 +171,13 @@
-                                 dialog.dismiss();
-                             });
-         } else {
--            builder.setTitle(R.string.folder_main_icons_title)
-+            builder.setTitle(bigCount == 2 ? R.string.folder_main_icons_title
-+                            : R.string.folder_main_icons3_title)
-                     .setMultiChoiceItems(titles, checked, (dialog, which, isChecked) -> {
-                         if (isChecked) {
-                             order.add(which);
-                             if (order.size() > bigCount) {
--                                // Keep at most two: uncheck the oldest choice
-+                                // Keep at most bigCount: uncheck the oldest choice
-                                 int oldest = order.remove(0);
-                                 ((AlertDialog) dialog).getListView()
-                                         .setItemChecked(oldest, false);
-@@ -185,35 +210,37 @@
-     }
- 
-     private static void resize(Launcher launcher, FolderIcon icon, FolderInfo info,
--            int newSpanX) {
-+            int newSpanX, int newSpanY) {
-         if (!(icon.getParent() instanceof ShortcutAndWidgetContainer)
-                 || !(icon.getParent().getParent() instanceof CellLayout)) {
-             return;
-         }
-         CellLayout layout = (CellLayout) icon.getParent().getParent();
-         CellLayout.LayoutParams lp = (CellLayout.LayoutParams) icon.getLayoutParams();
--        final int oldSpan = lp.cellHSpan;
--        int newX = lp.cellX;
-+        final int oldX = lp.cellX;
-+        final int oldY = lp.cellY;
-+        final int oldW = lp.cellHSpan;
-+        final int oldH = lp.cellVSpan;
-+        int newX = oldX;
-+        int newY = oldY;
- 
-         layout.markCellsAsUnoccupiedForView(icon);
--        if (newSpanX > oldSpan) {
--            final int need = newSpanX - oldSpan;
-+        if (newSpanX > oldW || newSpanY > oldH) {
-+            // Prefer growing to the right and down, then use free cells on the left and above
-             boolean found = false;
--            // Prefer growing to the right, then use free cells on the left as well
--            for (int left = 0; left <= need && !found; left++) {
--                int right = need - left;
--                int startX = lp.cellX - left;
--                int endX = lp.cellX + oldSpan + right;
--                if (startX < 0 || endX > layout.getCountX()) {
--                    continue;
--                }
--                boolean leftFree = left == 0
--                        || layout.isRegionVacant(startX, lp.cellY, left, 1);
--                boolean rightFree = right == 0
--                        || layout.isRegionVacant(lp.cellX + oldSpan, lp.cellY, right, 1);
--                if (leftFree && rightFree) {
--                    newX = startX;
--                    found = true;
-+            for (int dx = 0; dx <= Math.max(0, newSpanX - oldW) && !found; dx++) {
-+                for (int dy = 0; dy <= Math.max(0, newSpanY - oldH) && !found; dy++) {
-+                    int x = oldX - dx;
-+                    int y = oldY - dy;
-+                    if (x < 0 || y < 0 || x + newSpanX > layout.getCountX()
-+                            || y + newSpanY > layout.getCountY()) {
-+                        continue;
-+                    }
-+                    if (layout.isRegionVacant(x, y, newSpanX, newSpanY)) {
-+                        newX = x;
-+                        newY = y;
-+                        found = true;
-+                    }
-                 }
-             }
-             if (!found) {
-@@ -225,12 +252,15 @@
-         }
- 
-         lp.cellX = newX;
-+        lp.cellY = newY;
-         lp.tmpCellX = newX;
-+        lp.tmpCellY = newY;
-         lp.cellHSpan = newSpanX;
-+        lp.cellVSpan = newSpanY;
-         layout.markCellsAsOccupiedForView(icon);
- 
-         launcher.getModelWriter().modifyItemInDatabase(info, info.container, info.screenId,
--                newX, lp.cellY, newSpanX, 1);
-+                newX, newY, newSpanX, newSpanY);
-         icon.setLayoutParams(lp);
-         layout.requestLayout();
-         icon.invalidate();
-diff -ruN a/src/com/android/launcher3/folder/PreviewBackground.java b/src/com/android/launcher3/folder/PreviewBackground.java
---- a/src/com/android/launcher3/folder/PreviewBackground.java	2026-11-21 09:09:55.711414464 +0000
-+++ b/src/com/android/launcher3/folder/PreviewBackground.java	2026-11-21 09:10:23.244582263 +0000
-@@ -81,6 +81,9 @@
-     /** Wide (2x1) folder: the background is a rounded rectangle spanning two cells. */
-     private boolean mWide;
-     private int mWideSpan = 2;
-+    private boolean mTall;
-+    private int mAvailableHeight;
-+    int wideTopOffset;
-     int wideWidth;
-     int wideHeight;
-     private static final float WIDE_HEIGHT_FACTOR = 1.22f;
-@@ -172,6 +175,13 @@
-             basePreviewOffsetX = (availableSpaceX - wideWidth) / 2;
-         }
-         wideHeight = mWide ? Math.round(previewSize * WIDE_HEIGHT_FACTOR) : previewSize;
-+        wideTopOffset = -(wideHeight - previewSize) / 2;
-+        if (mWide && mTall && mAvailableHeight > 0) {
-+            // Two rows: the background fills the folder view above the folder name
-+            int bottom = mAvailableHeight - tallLabelHeight(grid) - grid.iconDrawablePaddingPx;
-+            wideTopOffset = 0;
-+            wideHeight = Math.max(previewSize, bottom - basePreviewOffsetY);
-+        }
-         // basePreviewOffsetY = topPadding +
-         //         (isInDrawer ? grid.allAppsFolderIconOffsetYPx : grid.folderIconOffsetYPx);
- 
-@@ -200,7 +210,7 @@
-             mSeparatorPaint.setStrokeCap(Paint.Cap.ROUND);
-         }
-         mSeparatorPaint.setStrokeWidth(Math.max(2f, wideHeight * 0.012f));
--        float cy = basePreviewOffsetY + previewSize / 2f;
-+        float cy = basePreviewOffsetY + wideTopOffset + wideHeight / 2f;
-         float half = wideHeight * 0.26f;
-         float px = basePreviewOffsetX + x;
-         canvas.drawLine(px, cy - half, px, cy + half, mSeparatorPaint);
-@@ -211,6 +221,17 @@
-         mWideSpan = span;
-     }
- 
-+    /** Wide folder with two rows (2x2); {@param availableHeight} is the folder view height. */
-+    public void setTall(boolean tall, int availableHeight) {
-+        mTall = tall;
-+        mAvailableHeight = availableHeight;
-+    }
-+
-+    /** Height of the folder name below a two row folder. */
-+    static int tallLabelHeight(DeviceProfile grid) {
-+        return Math.round(grid.iconTextSizePx * 1.4f);
-+    }
-+
-     public void setWide(boolean wide) {
-         mWide = wide;
-     }
-@@ -221,7 +242,7 @@
- 
-     private void updateWideRect(float scale, float inset) {
-         float cx = basePreviewOffsetX + wideWidth / 2f;
--        float cy = basePreviewOffsetY + previewSize / 2f;
-+        float cy = basePreviewOffsetY + wideTopOffset + wideHeight / 2f;
-         float halfW = wideWidth * scale / 2f - inset;
-         float halfH = wideHeight * scale / 2f - inset;
-         mWideRect.set(cx - halfW, cy - halfH, cx + halfW, cy + halfH);
-@@ -229,7 +250,11 @@
- 
-     private float getWideCornerRadius() {
-         // The corner radius follows the icon shape: 0.5 gives a pill (circle icons)
--        return getShapeCornerRatio() * wideHeight;
-+        float radius = getShapeCornerRatio() * wideHeight;
-+        if (mTall) {
-+            radius = Math.min(radius, wideWidth * 0.30f);
-+        }
-+        return radius;
-     }
- 
-     /** True if the icon shape is a circle (or close to it). */
-@@ -273,7 +298,7 @@
-     }
- 
-     void getBounds(Rect outBounds) {
--        int top = basePreviewOffsetY - (wideHeight - previewSize) / 2;
-+        int top = basePreviewOffsetY + wideTopOffset;
-         int left = basePreviewOffsetX;
-         int right = left + (mWide ? wideWidth : previewSize);
-         int bottom = top + wideHeight;
++                        icon.invalidate();
++                        return true;
++                    }));
+             final boolean separatorOn = info.hasOption(FolderInfo.FLAG_WIDE_SEPARATOR);
+             items.add(new OptionItem(
+                     separatorOn ? R.string.folder_separator_on : R.string.folder_separator_off,
 diff -ruN a/src/com/android/launcher3/folder/PreviewItemManager.java b/src/com/android/launcher3/folder/PreviewItemManager.java
---- a/src/com/android/launcher3/folder/PreviewItemManager.java	2026-11-21 09:09:55.719087078 +0000
-+++ b/src/com/android/launcher3/folder/PreviewItemManager.java	2026-11-21 09:10:23.244689906 +0000
-@@ -52,6 +52,8 @@
+--- a/src/com/android/launcher3/folder/PreviewItemManager.java	2026-11-21 23:45:01.281219446 +0000
++++ b/src/com/android/launcher3/folder/PreviewItemManager.java	2026-11-21 23:45:01.324012671 +0000
+@@ -52,6 +52,7 @@
      // as member variables for shared usage and to avoid computation on each frame
      private float mIntrinsicIconSize = -1;
      private int mTotalWidth = -1;
-+    private int mTotalHeight = -1;
 +    private int mWideKey = -1;
      private int mPrevTopPadding = -1;
      private Drawable mReferenceDrawable = null;
  
-@@ -103,26 +105,45 @@
+@@ -103,15 +104,23 @@
      }
  
      private void computePreviewDrawingParams(int drawableSize, int totalSize) {
@@ -687,57 +177,31 @@ diff -ruN a/src/com/android/launcher3/folder/PreviewItemManager.java b/src/com/a
 +        int wideKey = 0;
 +        if (infoTag instanceof FolderInfo) {
 +            FolderInfo folderInfo = (FolderInfo) infoTag;
-+            wideKey = folderInfo.spanX * 100 + folderInfo.spanY * 10
-+                    + folderInfo.getGroupLayoutMode();
++            wideKey = folderInfo.spanX * 10 + folderInfo.getGroupLayoutMode();
 +        }
          if (mIntrinsicIconSize != drawableSize || mTotalWidth != totalSize ||
-+                mTotalHeight != mIcon.getMeasuredHeight() || mWideKey != wideKey ||
-                 mPrevTopPadding != mIcon.getPaddingTop()) {
+-                mPrevTopPadding != mIcon.getPaddingTop()) {
++                mWideKey != wideKey || mPrevTopPadding != mIcon.getPaddingTop()) {
              mIntrinsicIconSize = drawableSize;
              mTotalWidth = totalSize;
-+            mTotalHeight = mIcon.getMeasuredHeight();
 +            mWideKey = wideKey;
              mPrevTopPadding = mIcon.getPaddingTop();
  
              Object tag = mIcon.getTag();
              boolean wide = tag instanceof FolderInfo && ((FolderInfo) tag).spanX > 1;
              int span = wide ? ((FolderInfo) tag).spanX : 1;
-+            boolean tall = wide && ((FolderInfo) tag).spanY > 1;
-+            int bigCount = wide ? ((FolderInfo) tag).getBigIconCount() : 1;
 +            int mode = wide ? ((FolderInfo) tag).getGroupLayoutMode() : 0;
              mIcon.mBackground.setWide(wide);
-+            mIcon.mBackground.setTall(tall, mTotalHeight);
              mIcon.mBackground.setWideSpan(span);
              mIcon.mBackground.setup(mIcon.mLauncher, mIcon.mLauncher, mIcon, mTotalWidth,
-                     mIcon.getPaddingTop());
-             mIcon.mPreviewLayoutRule.init(mIcon.mBackground.previewSize, mIntrinsicIconSize,
-                     Utilities.isRtl(mIcon.getResources()));
-+            boolean circleLayout = mode == FolderInfo.GROUP_LAYOUT_DIAMOND
-+                    || (mode == FolderInfo.GROUP_LAYOUT_AUTO
-+                            && mIcon.mBackground.isCircleShape());
+@@ -121,7 +130,9 @@
              mIcon.mPreviewLayoutRule.setWide(
                      wide ? mIcon.mBackground.wideWidth : 0,
                      wide ? mIcon.mBackground.wideHeight : 0,
 -                    wide && mIcon.mBackground.isCircleShape(),
--                    Math.max(1, span - 1));
-+                    wide && circleLayout,
-+                    Math.max(1, bigCount),
-+                    tall ? 2 : 1,
-+                    mIcon.mBackground.wideTopOffset + mIcon.mBackground.wideHeight / 2f);
++                    wide && (mode == FolderInfo.GROUP_LAYOUT_DIAMOND
++                            || (mode == FolderInfo.GROUP_LAYOUT_AUTO
++                                    && mIcon.mBackground.isCircleShape())),
+                     Math.max(1, span - 1));
  
              updatePreviewItems(false);
-         }
-diff -ruN a/src/com/android/launcher3/model/LoaderTask.java b/src/com/android/launcher3/model/LoaderTask.java
---- a/src/com/android/launcher3/model/LoaderTask.java	2026-11-21 09:09:55.699724994 +0000
-+++ b/src/com/android/launcher3/model/LoaderTask.java	2026-11-21 09:10:23.244089898 +0000
-@@ -586,7 +586,9 @@
-                             folderInfo.spanX = folderInfo.container
-                                     == LauncherSettings.Favorites.CONTAINER_DESKTOP
-                                     ? Math.max(1, Math.min(3, c.getInt(spanXIndex))) : 1;
--                            folderInfo.spanY = 1;
-+                            // A 2x2 folder spans two rows
-+                            folderInfo.spanY = (folderInfo.spanX == 2
-+                                    && c.getInt(spanYIndex) == 2) ? 2 : 1;
-                             folderInfo.options = c.getInt(optionsIndex);
- 
-                             folderInfo.swipeUpAction = c.getString(swipeUpActionEntryIndex);
