@@ -1,18 +1,29 @@
 diff -ruN a/src/com/android/launcher3/DeviceProfile.java b/src/com/android/launcher3/DeviceProfile.java
 --- a/src/com/android/launcher3/DeviceProfile.java	2026-11-23 08:38:50.843895602 +0700
-+++ b/src/com/android/launcher3/DeviceProfile.java	2026-11-23 08:39:02.732011433 +0700
-@@ -288,6 +288,17 @@
++++ b/src/com/android/launcher3/DeviceProfile.java	2026-11-23 09:50:44.713041920 +0700
+@@ -110,6 +110,8 @@
+     // Hotseat
+     public int hotseatIconSizePx;
+     public int hotseatCellHeightPx;
++    // Extra height added to the hotseat by additional dock rows (0 with a single row)
++    public int hotseatExtraRowsPx;
+     // In portrait: size = height, in landscape: size = width
+     public int hotseatBarSizePx;
+     public final int hotseatBarTopPaddingPx;
+@@ -288,6 +290,19 @@
              }
          }
  
 +        // Second dock row: make the hotseat tall enough for every extra row.
 +        int dockRows = prefs.getDockRowsCount();
++        hotseatExtraRowsPx = 0;
 +        if (!prefs.getDockHide() && !isVerticalBarLayout() && dockRows > 1) {
 +            int rowHeight = hotseatBarSizePx - hotseatBarTopPaddingPx - hotseatBarBottomPaddingPx;
 +            if (rowHeight <= 0) {
 +                rowHeight = hotseatCellHeightPx;
 +            }
-+            hotseatBarSizePx += (dockRows - 1) * rowHeight;
++            hotseatExtraRowsPx = (dockRows - 1) * rowHeight;
++            hotseatBarSizePx += hotseatExtraRowsPx;
 +            updateAvailableDimensions(dm, res);
 +        }
 +
@@ -45,3 +56,17 @@ diff -ruN a/src/com/android/launcher3/Hotseat.java b/src/com/android/launcher3/H
          }
      }
  
+diff -ruN a/src/com/google/android/apps/nexuslauncher/qsb/AllAppsQsbLayout.java b/src/com/google/android/apps/nexuslauncher/qsb/AllAppsQsbLayout.java
+--- a/src/com/google/android/apps/nexuslauncher/qsb/AllAppsQsbLayout.java	2026-11-23 08:38:50.764225268 +0700
++++ b/src/com/google/android/apps/nexuslauncher/qsb/AllAppsQsbLayout.java	2026-11-23 09:50:44.713427244 +0700
+@@ -103,7 +103,9 @@
+     @Override
+     public float getScrollRangeDelta(Rect insets) {
+         DeviceProfile wallpaperDeviceProfile = mActivity.getWallpaperDeviceProfile();
+-        int i = (wallpaperDeviceProfile.hotseatBarSizePx - wallpaperDeviceProfile.hotseatCellHeightPx) - getLayoutParams().height;
++        // Extra dock rows grow the hotseat upwards, the search bar stays below them.
++        int i = (wallpaperDeviceProfile.hotseatBarSizePx - wallpaperDeviceProfile.hotseatExtraRowsPx
++                - wallpaperDeviceProfile.hotseatCellHeightPx) - getLayoutParams().height;
+         int i2 = insets.bottom;
+         return (float) (((getLayoutParams().height + Math.max(-mVerticalOffset, insets.top - mTopAdjusting)) + mVerticalOffset) + (i2 + ((int) (((float) (i - i2)) * 0.45f))));
+     }
