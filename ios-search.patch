@@ -1,6 +1,6 @@
-diff -ruN a/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt b/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt
---- a/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt	2026-11-22 16:11:07.892947627 +0000
-+++ b/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt	2026-11-22 16:11:31.021065173 +0000
+diff -ruN -x '*.orig' orig/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt src/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt
+--- a/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt	2026-11-23 08:31:13.332641557 +0700
++++ b/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt	2026-11-23 08:31:30.288287236 +0700
 @@ -20,6 +20,14 @@
  package ch.deletescape.lawnchair.allapps
  
@@ -16,7 +16,7 @@ diff -ruN a/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt b/la
  import android.graphics.Canvas
  import android.graphics.Paint
  import android.graphics.RectF
-@@ -108,6 +116,90 @@
+@@ -108,6 +116,113 @@
          }
      }
  
@@ -38,12 +38,35 @@ diff -ruN a/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt b/la
 +            layoutParams = FrameLayout.LayoutParams(
 +                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
 +                gravity = Gravity.START or Gravity.CENTER_VERTICAL
-+                marginStart = (micWidth * 0.78f).toInt()
 +            }
 +            alpha = 0f
 +        }
 +        glassHint = hint
 +        addView(hint)
++    }
++
++    /**
++     * Places the hint right after the search icon. The icon is centered inside its own view, so
++     * the hint is anchored to the icon's real right edge instead of a fixed margin, otherwise the
++     * two overlap.
++     */
++    private fun placeGlassHint() {
++        val hint = glassHint ?: return
++        val icon = mHotseatLogoIconView ?: return
++        if (hint.measuredWidth == 0) return
++        val density = resources.displayMetrics.density
++        val iconWidth = icon.drawable?.intrinsicWidth?.takeIf { it > 0 } ?: (22 * density).toInt()
++        val gap = (8 * density).toInt()
++        val iconRight = icon.left + (icon.width + iconWidth) / 2
++        val rtl = layoutDirection == LAYOUT_DIRECTION_RTL
++        if (rtl) {
++            val iconLeft = icon.left + (icon.width - iconWidth) / 2
++            val end = iconLeft - gap
++            hint.layout(end - hint.measuredWidth, hint.top, end, hint.bottom)
++        } else {
++            val start = iconRight + gap
++            hint.layout(start, hint.top, start + hint.measuredWidth, hint.bottom)
++        }
 +    }
 +
 +    override fun getHotseatIcon(colored: Boolean): Drawable? {
@@ -107,7 +130,15 @@ diff -ruN a/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt b/la
      override fun onEnabledChanged() {
          createBlurDrawable()
      }
-@@ -163,7 +255,7 @@
+@@ -126,6 +241,7 @@
+ 
+     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+         super.onLayout(changed, left, top, right, bottom)
++        placeGlassHint()
+         createBlurDrawable()
+     }
+ 
+@@ -163,7 +279,7 @@
                  canvas.restore()
              }
          }
@@ -116,7 +147,7 @@ diff -ruN a/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt b/la
      }
  
      private fun getBgColor(): Int {
-@@ -202,6 +294,10 @@
+@@ -202,6 +318,10 @@
  
      companion object {
  
@@ -127,9 +158,9 @@ diff -ruN a/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt b/la
          val HOTSEAT_BG_PROGRESS = object :
                  FloatProperty<BlurQsbLayout>("hotseatProgress") {
              override fun setValue(qsb: BlurQsbLayout, v: Float) {
-diff -ruN a/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable.kt b/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable.kt
---- a/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable.kt	1970-01-01 00:00:00.000000000 +0000
-+++ b/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable.kt	2026-11-22 16:11:31.025444952 +0000
+diff -ruN -x '*.orig' orig/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable.kt src/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable.kt
+--- a/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable.kt	1970-01-01 07:00:00.000000000 +0700
++++ b/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable.kt	2026-11-23 08:31:13.383947775 +0700
 @@ -0,0 +1,80 @@
 +/*
 + * Copyright (C) 2026 The Android Open Source Project
@@ -211,9 +242,9 @@ diff -ruN a/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable
 +
 +    override fun getIntrinsicHeight(): Int = sizePx
 +}
-diff -ruN a/res/drawable/ic_qsb_glass_search.xml b/res/drawable/ic_qsb_glass_search.xml
---- a/res/drawable/ic_qsb_glass_search.xml	1970-01-01 00:00:00.000000000 +0000
-+++ b/res/drawable/ic_qsb_glass_search.xml	2026-11-22 16:11:31.027252987 +0000
+diff -ruN -x '*.orig' orig/res/drawable/ic_qsb_glass_search.xml src/res/drawable/ic_qsb_glass_search.xml
+--- a/res/drawable/ic_qsb_glass_search.xml	1970-01-01 07:00:00.000000000 +0700
++++ b/res/drawable/ic_qsb_glass_search.xml	2026-11-23 08:31:13.384056949 +0700
 @@ -0,0 +1,9 @@
 +<vector xmlns:android="http://schemas.android.com/apk/res/android"
 +    android:width="22dp"
@@ -224,9 +255,9 @@ diff -ruN a/res/drawable/ic_qsb_glass_search.xml b/res/drawable/ic_qsb_glass_sea
 +        android:fillColor="#F2FFFFFF"
 +        android:pathData="M15.5,14h-0.79l-0.28,-0.27C15.41,12.59 16,11.11 16,9.5 16,5.91 13.09,3 9.5,3S3,5.91 3,9.5 5.91,16 9.5,16c1.61,0 3.09,-0.59 4.23,-1.57l0.27,0.28v0.79l5,4.99L20.49,19l-4.99,-5zM9.5,14C7.01,14 5,11.99 5,9.5S7.01,5 9.5,5 14,7.01 14,9.5 11.99,14 9.5,14z"/>
 +</vector>
-diff -ruN a/res/values/qsb_glass_strings.xml b/res/values/qsb_glass_strings.xml
---- a/res/values/qsb_glass_strings.xml	1970-01-01 00:00:00.000000000 +0000
-+++ b/res/values/qsb_glass_strings.xml	2026-11-22 16:11:31.028335803 +0000
+diff -ruN -x '*.orig' orig/res/values/qsb_glass_strings.xml src/res/values/qsb_glass_strings.xml
+--- a/res/values/qsb_glass_strings.xml	1970-01-01 07:00:00.000000000 +0700
++++ b/res/values/qsb_glass_strings.xml	2026-11-23 08:31:13.384132577 +0700
 @@ -0,0 +1,4 @@
 +<?xml version="1.0" encoding="utf-8"?>
 +<resources>
