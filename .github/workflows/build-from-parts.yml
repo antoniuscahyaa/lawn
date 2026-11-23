@@ -91,6 +91,14 @@ jobs:
             echo "ios-folder-2x1.patch tidak ada di repo, dilewati"
           fi
 
+      - name: Terapkan patch search bar kaca (opsional)
+        run: |
+          if [ -f ios-search.patch ]; then
+            patch -p1 -d src < ios-search.patch
+          else
+            echo "ios-search.patch tidak ada di repo, dilewati"
+          fi
+
       - name: Atur varian ci (paket ch.deletescape.lawnchair.ci)
         working-directory: src
         run: |
