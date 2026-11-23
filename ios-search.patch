@@ -1,0 +1,234 @@
+diff -ruN a/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt b/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt
+--- a/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt	2026-11-22 16:11:07.892947627 +0000
++++ b/lawnchair/src/ch/deletescape/lawnchair/allapps/BlurQsbLayout.kt	2026-11-22 16:11:31.021065173 +0000
+@@ -20,6 +20,14 @@
+ package ch.deletescape.lawnchair.allapps
+ 
+ import android.content.Context
++import android.content.Intent
++import android.graphics.Color
++import android.util.TypedValue
++import android.view.Gravity
++import android.view.ViewGroup
++import android.widget.FrameLayout
++import android.widget.TextView
++import androidx.core.content.ContextCompat
+ import android.graphics.Canvas
+ import android.graphics.Paint
+ import android.graphics.RectF
+@@ -108,6 +116,90 @@
+         }
+     }
+ 
++    // --- Glass style search bar (dock): transparent pill, search icon, hint and Gemini icon ---
++    private var glassHint: TextView? = null
++
++    override fun useTwoBubbles(): Boolean = false
++
++    override fun onFinishInflate() {
++        super.onFinishInflate()
++        val hint = TextView(context).apply {
++            text = context.getString(R.string.qsb_glass_hint)
++            setTextColor(Color.argb(242, 255, 255, 255))
++            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
++            maxLines = 1
++            includeFontPadding = false
++            gravity = Gravity.CENTER_VERTICAL or Gravity.START
++            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
++            layoutParams = FrameLayout.LayoutParams(
++                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
++                gravity = Gravity.START or Gravity.CENTER_VERTICAL
++                marginStart = (micWidth * 0.78f).toInt()
++            }
++            alpha = 0f
++        }
++        glassHint = hint
++        addView(hint)
++    }
++
++    override fun getHotseatIcon(colored: Boolean): Drawable? {
++        return ContextCompat.getDrawable(context, R.drawable.ic_qsb_glass_search)
++    }
++
++    override fun getMicIcon(colored: Boolean): Drawable? {
++        val size = (24 * resources.displayMetrics.density).toInt()
++        return GeminiSparkleDrawable(size)
++    }
++
++    override fun onClick(view: View) {
++        if (view === mMicIconView && launchGemini()) return
++        super.onClick(view)
++    }
++
++    private fun launchGemini(): Boolean {
++        val intent = context.packageManager.getLaunchIntentForPackage(GEMINI_PACKAGE) ?: return false
++        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
++        return try {
++            context.startActivity(intent)
++            true
++        } catch (e: Exception) {
++            false
++        }
++    }
++
++    private fun drawGlass(canvas: Canvas, progress: Float) {
++        tmpRectF.set(paddingLeft.toFloat(), paddingTop.toFloat(),
++                     (width - paddingRight).toFloat(), (height - paddingBottom).toFloat())
++        val radius = AbstractQsbLayout.getCornerRadius(context, tmpRectF.height() / 2f)
++        paint.style = Paint.Style.FILL
++        paint.color = Color.argb((GLASS_FILL_ALPHA * progress).toInt(), 255, 255, 255)
++        canvas.drawRoundRect(tmpRectF, radius, radius, paint)
++        paint.style = Paint.Style.STROKE
++        paint.strokeWidth = Math.max(1f, resources.displayMetrics.density * 0.6f)
++        paint.color = Color.argb((GLASS_STROKE_ALPHA * progress).toInt(), 255, 255, 255)
++        tmpRectF.inset(paint.strokeWidth / 2f, paint.strokeWidth / 2f)
++        canvas.drawRoundRect(tmpRectF, radius, radius, paint)
++        paint.style = Paint.Style.FILL
++    }
++
++    private fun drawBackground(canvas: Canvas) {
++        val progress = mHotseatProgress
++        glassHint?.let {
++            val a = progress.coerceIn(0f, 1f)
++            if (it.alpha != a) it.alpha = a
++        }
++        when {
++            progress >= 1f -> drawGlass(canvas, 1f)
++            progress <= 0f -> super.drawQsb(canvas)
++            else -> {
++                canvas.saveLayerAlpha(null, ((1f - progress) * 255).toInt())
++                super.drawQsb(canvas)
++                canvas.restore()
++                drawGlass(canvas, progress)
++            }
++        }
++    }
++
+     override fun onEnabledChanged() {
+         createBlurDrawable()
+     }
+@@ -163,7 +255,7 @@
+                 canvas.restore()
+             }
+         }
+-        super.drawQsb(canvas)
++        drawBackground(canvas)
+     }
+ 
+     private fun getBgColor(): Int {
+@@ -202,6 +294,10 @@
+ 
+     companion object {
+ 
++        private const val GEMINI_PACKAGE = "com.google.android.apps.bard"
++        private const val GLASS_FILL_ALPHA = 76
++        private const val GLASS_STROKE_ALPHA = 166
++
+         val HOTSEAT_BG_PROGRESS = object :
+                 FloatProperty<BlurQsbLayout>("hotseatProgress") {
+             override fun setValue(qsb: BlurQsbLayout, v: Float) {
+diff -ruN a/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable.kt b/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable.kt
+--- a/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable.kt	1970-01-01 00:00:00.000000000 +0000
++++ b/lawnchair/src/ch/deletescape/lawnchair/allapps/GeminiSparkleDrawable.kt	2026-11-22 16:11:31.025444952 +0000
+@@ -0,0 +1,80 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package ch.deletescape.lawnchair.allapps
++
++import android.graphics.Canvas
++import android.graphics.ColorFilter
++import android.graphics.LinearGradient
++import android.graphics.Paint
++import android.graphics.Path
++import android.graphics.PixelFormat
++import android.graphics.Rect
++import android.graphics.Shader
++import android.graphics.drawable.Drawable
++
++/**
++ * A four pointed sparkle with a blue to purple to red gradient, used as the assistant icon of the
++ * search bar.
++ */
++class GeminiSparkleDrawable(private val sizePx: Int) : Drawable() {
++
++    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
++    private val path = Path()
++
++    override fun onBoundsChange(bounds: Rect) {
++        val l = bounds.left.toFloat()
++        val t = bounds.top.toFloat()
++        val r = bounds.right.toFloat()
++        val b = bounds.bottom.toFloat()
++        val w = r - l
++        val h = b - t
++        val cx = (l + r) / 2f
++        val cy = (t + b) / 2f
++        val dx = w * 0.07f
++        val dy = h * 0.07f
++        path.reset()
++        path.moveTo(cx, t)
++        path.quadTo(cx + dx, cy - dy, r, cy)
++        path.quadTo(cx + dx, cy + dy, cx, b)
++        path.quadTo(cx - dx, cy + dy, l, cy)
++        path.quadTo(cx - dx, cy - dy, cx, t)
++        path.close()
++        paint.shader = LinearGradient(l, b, r, t,
++                intArrayOf(0xFF4285F4.toInt(), 0xFF9B72CB.toInt(), 0xFFD96570.toInt()),
++                floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
++    }
++
++    override fun draw(canvas: Canvas) {
++        canvas.drawPath(path, paint)
++    }
++
++    override fun setAlpha(alpha: Int) {
++        paint.alpha = alpha
++        invalidateSelf()
++    }
++
++    override fun setColorFilter(colorFilter: ColorFilter?) {
++        paint.colorFilter = colorFilter
++        invalidateSelf()
++    }
++
++    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
++
++    override fun getIntrinsicWidth(): Int = sizePx
++
++    override fun getIntrinsicHeight(): Int = sizePx
++}
+diff -ruN a/res/drawable/ic_qsb_glass_search.xml b/res/drawable/ic_qsb_glass_search.xml
+--- a/res/drawable/ic_qsb_glass_search.xml	1970-01-01 00:00:00.000000000 +0000
++++ b/res/drawable/ic_qsb_glass_search.xml	2026-11-22 16:11:31.027252987 +0000
+@@ -0,0 +1,9 @@
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="22dp"
++    android:height="22dp"
++    android:viewportWidth="24"
++    android:viewportHeight="24">
++    <path
++        android:fillColor="#F2FFFFFF"
++        android:pathData="M15.5,14h-0.79l-0.28,-0.27C15.41,12.59 16,11.11 16,9.5 16,5.91 13.09,3 9.5,3S3,5.91 3,9.5 5.91,16 9.5,16c1.61,0 3.09,-0.59 4.23,-1.57l0.27,0.28v0.79l5,4.99L20.49,19l-4.99,-5zM9.5,14C7.01,14 5,11.99 5,9.5S7.01,5 9.5,5 14,7.01 14,9.5 11.99,14 9.5,14z"/>
++</vector>
+diff -ruN a/res/values/qsb_glass_strings.xml b/res/values/qsb_glass_strings.xml
+--- a/res/values/qsb_glass_strings.xml	1970-01-01 00:00:00.000000000 +0000
++++ b/res/values/qsb_glass_strings.xml	2026-11-22 16:11:31.028335803 +0000
+@@ -0,0 +1,4 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="qsb_glass_hint">Cari</string>
++</resources>
