@@ -139,10 +139,14 @@ jobs:
         run: |
           cat > "$RUNNER_TEMP/extra-repos.gradle" <<'GRADLE'
           allprojects {
-              repositories {
-                  maven { url 'https://maven.aliyun.com/repository/jcenter' }
-                  maven { url 'https://maven.aliyun.com/repository/public' }
-                  maven { url 'https://maven.aliyun.com/repository/google' }
+              // afterEvaluate: mirror dipasang SETELAH repo bawaan proyek (google, mavenCentral),
+              // jadi hanya jadi cadangan dan tidak menggantikan sumber resmi
+              afterEvaluate {
+                  repositories {
+                      maven { url 'https://maven.aliyun.com/repository/jcenter' }
+                      maven { url 'https://maven.aliyun.com/repository/public' }
+                      maven { url 'https://maven.aliyun.com/repository/google' }
+                  }
               }
           }
           GRADLE
@@ -151,7 +155,12 @@ jobs:
         working-directory: src
         run: |
           chmod +x gradlew
-          ./gradlew -I "$RUNNER_TEMP/extra-repos.gradle" assembleAospWithQuickstepLawnchairCiDebug --no-daemon --stacktrace
+          # Coba dua kali: unduhan dependensi kadang gagal sementara (mis. 502 dari server)
+          for i in 1 2; do
+            ./gradlew -I "$RUNNER_TEMP/extra-repos.gradle" assembleAospWithQuickstepLawnchairCiDebug --no-daemon --stacktrace && exit 0
+            echo "::warning::Build percobaan $i gagal"
+          done
+          exit 1
 
       - name: Upload APK tanpa tanda tangan keystore (cadangan)
         uses: actions/upload-artifact@v4
