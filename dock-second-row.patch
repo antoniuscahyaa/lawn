@@ -56,6 +56,71 @@ diff -ruN a/src/com/android/launcher3/Hotseat.java b/src/com/android/launcher3/H
          }
      }
  
+diff -ruN a/src/com/android/launcher3/model/LoaderCursor.java b/src/com/android/launcher3/model/LoaderCursor.java
+--- a/src/com/android/launcher3/model/LoaderCursor.java	2026-11-23 08:38:50.768250878 +0700
++++ b/src/com/android/launcher3/model/LoaderCursor.java	2026-11-23 10:25:41.896869417 +0700
+@@ -432,22 +432,34 @@
+                 return false;
+             }
+ 
+-            if (hotseatOccupancy != null) {
+-                if (hotseatOccupancy.cells[hotseatX][hotseatY]) {
++            // Wide items (2x1, 3x1 folders) occupy several cells of the same hotseat row
++            int hotseatSpan = Math.max(1, item.spanX);
++            if (hotseatX + hotseatSpan > hotseatSize) {
++                Log.e(TAG, "Error loading shortcut " + item
++                        + " into hotseat position " + item.screenId
++                        + ", span " + hotseatSpan + " does not fit in the row");
++                return false;
++            }
++
++            GridOccupancy hotseatGrid = hotseatOccupancy;
++            if (hotseatGrid == null) {
++                hotseatGrid = new GridOccupancy(hotseatSize, hotseatRows);
++            }
++            for (int i = 0; i < hotseatSpan; i++) {
++                if (hotseatGrid.cells[hotseatX + i][hotseatY]) {
+                     Log.e(TAG, "Error loading shortcut into hotseat " + item
+                             + " into position (" + item.screenId + ":" + item.cellX + ","
+                             + item.cellY + ") already occupied");
+                     return false;
+-                } else {
+-                    hotseatOccupancy.cells[hotseatX][hotseatY] = true;
+-                    return true;
+                 }
+-            } else {
+-                final GridOccupancy occupancy = new GridOccupancy(hotseatSize, hotseatRows);
+-                occupancy.cells[hotseatX][hotseatY] = true;
+-                occupied.put(LauncherSettings.Favorites.CONTAINER_HOTSEAT, occupancy);
+-                return true;
+             }
++            for (int i = 0; i < hotseatSpan; i++) {
++                hotseatGrid.cells[hotseatX + i][hotseatY] = true;
++            }
++            if (hotseatOccupancy == null) {
++                occupied.put(LauncherSettings.Favorites.CONTAINER_HOTSEAT, hotseatGrid);
++            }
++            return true;
+         } else if (item.container != LauncherSettings.Favorites.CONTAINER_DESKTOP) {
+             // Skip further checking if it is not the hotseat or workspace container
+             return true;
+diff -ruN a/src/com/android/launcher3/model/LoaderTask.java b/src/com/android/launcher3/model/LoaderTask.java
+--- a/src/com/android/launcher3/model/LoaderTask.java	2026-11-23 08:38:50.769225179 +0700
++++ b/src/com/android/launcher3/model/LoaderTask.java	2026-11-23 10:25:41.895935066 +0700
+@@ -582,9 +582,11 @@
+ 
+                             // Do not trim the folder label, as is was set by the user.
+                             folderInfo.title = c.getString(c.titleIndex);
+-                            // Folders are 1x1, or wide (2x1) on the workspace
+-                            folderInfo.spanX = folderInfo.container
++                            // Folders are 1x1, or wide (2x1, 3x1) on the workspace and in the dock
++                            folderInfo.spanX = (folderInfo.container
+                                     == LauncherSettings.Favorites.CONTAINER_DESKTOP
++                                    || folderInfo.container
++                                    == LauncherSettings.Favorites.CONTAINER_HOTSEAT)
+                                     ? Math.max(1, Math.min(3, c.getInt(spanXIndex))) : 1;
+                             folderInfo.spanY = 1;
+                             folderInfo.options = c.getInt(optionsIndex);
 diff -ruN a/src/com/google/android/apps/nexuslauncher/qsb/AllAppsQsbLayout.java b/src/com/google/android/apps/nexuslauncher/qsb/AllAppsQsbLayout.java
 --- a/src/com/google/android/apps/nexuslauncher/qsb/AllAppsQsbLayout.java	2026-11-23 08:38:50.764225268 +0700
 +++ b/src/com/google/android/apps/nexuslauncher/qsb/AllAppsQsbLayout.java	2026-11-23 09:50:44.713427244 +0700
