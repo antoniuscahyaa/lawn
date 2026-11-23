@@ -91,6 +91,14 @@ jobs:
             echo "ios-folder-2x1.patch tidak ada di repo, dilewati"
           fi
 
+      - name: Terapkan patch baris kedua dock (opsional)
+        run: |
+          if [ -f dock-second-row.patch ]; then
+            patch -p1 -d src < dock-second-row.patch
+          else
+            echo "dock-second-row.patch tidak ada di repo, dilewati"
+          fi
+
       - name: Terapkan patch search bar kaca (opsional)
         run: |
           if [ -f ios-search.patch ]; then
