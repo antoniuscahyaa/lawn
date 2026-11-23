@@ -107,6 +107,14 @@ jobs:
             echo "ios-search.patch tidak ada di repo, dilewati"
           fi
 
+      - name: Terapkan patch supericon 2x1 (opsional)
+        run: |
+          if [ -f ios-supericon.patch ]; then
+            patch -p1 -d src < ios-supericon.patch
+          else
+            echo "ios-supericon.patch tidak ada di repo, dilewati"
+          fi
+
       - name: Atur varian ci (paket ch.deletescape.lawnchair.ci)
         working-directory: src
         run: |
