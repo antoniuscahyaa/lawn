@@ -1,0 +1,47 @@
+diff -ruN a/src/com/android/launcher3/DeviceProfile.java b/src/com/android/launcher3/DeviceProfile.java
+--- a/src/com/android/launcher3/DeviceProfile.java	2026-11-23 08:38:50.843895602 +0700
++++ b/src/com/android/launcher3/DeviceProfile.java	2026-11-23 08:39:02.732011433 +0700
+@@ -288,6 +288,17 @@
+             }
+         }
+ 
++        // Second dock row: make the hotseat tall enough for every extra row.
++        int dockRows = prefs.getDockRowsCount();
++        if (!prefs.getDockHide() && !isVerticalBarLayout() && dockRows > 1) {
++            int rowHeight = hotseatBarSizePx - hotseatBarTopPaddingPx - hotseatBarBottomPaddingPx;
++            if (rowHeight <= 0) {
++                rowHeight = hotseatCellHeightPx;
++            }
++            hotseatBarSizePx += (dockRows - 1) * rowHeight;
++            updateAvailableDimensions(dm, res);
++        }
++
+         updateWorkspacePadding();
+ 
+         // This is done last, after iconSizePx is calculated above.
+diff -ruN a/src/com/android/launcher3/Hotseat.java b/src/com/android/launcher3/Hotseat.java
+--- a/src/com/android/launcher3/Hotseat.java	2026-11-23 08:38:50.834210707 +0700
++++ b/src/com/android/launcher3/Hotseat.java	2026-11-23 08:39:02.737181973 +0700
+@@ -56,7 +56,11 @@
+     }
+ 
+     int getCellYFromOrder(int rank) {
+-        return mHasVerticalHotseat ? (getCountY() - (rank + 1)) : 0;
++        if (mHasVerticalHotseat) {
++            return getCountY() - ((rank % getCountY()) + 1);
++        }
++        // Horizontal hotseat: rank = x + y * columns (see ModelWriter#getOrderInHotseat).
++        return Math.min(rank / getCountX(), getCountY() - 1);
+     }
+ 
+     public void resetLayout(boolean hasVerticalHotseat) {
+@@ -66,7 +70,8 @@
+         if (hasVerticalHotseat) {
+             setGridSize(1, idp.numHotseatIcons);
+         } else {
+-            setGridSize(idp.numHotseatIcons, 1);
++            int rows = Utilities.getLawnchairPrefs(getContext()).getDockRowsCount();
++            setGridSize(idp.numHotseatIcons, rows);
+         }
+     }
+ 
