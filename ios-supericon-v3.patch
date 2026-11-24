@@ -27,7 +27,7 @@ index 35aa42d..6906f46 100644
      <string name="supericon_no_space">Tidak ada ruang kosong di sekitar ikon</string>
  </resources>
 diff --git a/src/com/android/launcher3/popup/SuperIconMenu.java b/src/com/android/launcher3/popup/SuperIconMenu.java
-index 242a23e..b159c58 100644
+index 242a23e..b0582b1 100644
 --- a/src/com/android/launcher3/popup/SuperIconMenu.java
 +++ b/src/com/android/launcher3/popup/SuperIconMenu.java
 @@ -15,6 +15,8 @@
@@ -68,14 +68,14 @@ index 242a23e..b159c58 100644
          if (isSuper) {
              final boolean solid = WorkspaceItemInfo.isSolidStyle(currentStyle);
              final int otherStyle = solid
-@@ -90,6 +104,36 @@ public final class SuperIconMenu {
+@@ -90,6 +104,40 @@ public final class SuperIconMenu {
          OptionsPopupView.show(launcher, new RectF(rect), items);
      }
  
 +    /** Opens the editor for the supericon's image, label colour, size and position. */
 +    private static void customize(Launcher launcher, WorkspaceItemInfo info, SuperIconView view) {
 +        Intent i = new Intent(launcher, SuperIconEditActivity.class);
-+        i.putExtra(SuperIconEditActivity.EXTRA_ID, info.id);
++        i.putExtra(SuperIconEditActivity.EXTRA_ID, (long) info.id);
 +        i.putExtra(SuperIconEditActivity.EXTRA_LABEL,
 +                info.title == null ? "" : info.title.toString());
 +        i.putExtra(SuperIconEditActivity.EXTRA_SOLID,
@@ -99,7 +99,11 @@ index 242a23e..b159c58 100644
 +                // The preview is simply drawn without the icon
 +            }
 +        }
-+        launcher.startActivity(i);
++        try {
++            launcher.startActivity(i);
++        } catch (RuntimeException e) {
++            Toast.makeText(launcher, "Gagal membuka editor: " + e, Toast.LENGTH_LONG).show();
++        }
 +    }
 +
      /**
