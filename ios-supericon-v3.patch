@@ -1,0 +1,1350 @@
+diff --git a/lawnchair/AndroidManifest.xml b/lawnchair/AndroidManifest.xml
+index 3e34e42..6f6b520 100644
+--- a/lawnchair/AndroidManifest.xml
++++ b/lawnchair/AndroidManifest.xml
+@@ -99,6 +99,12 @@
+         android:networkSecurityConfig="@xml/network_security_config"
+         android:name="ch.deletescape.lawnchair.LawnchairApp">
+ 
++        <activity
++            android:name="com.android.launcher3.supericon.SuperIconEditActivity"
++            android:excludeFromRecents="true"
++            android:exported="false"
++            android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"/>
++
+         <activity
+             android:excludeFromRecents="true"
+             android:name="ch.deletescape.lawnchair.LawnchairLauncher$Screenshot"
+diff --git a/res/values/supericon_strings.xml b/res/values/supericon_strings.xml
+index 35aa42d..6906f46 100644
+--- a/res/values/supericon_strings.xml
++++ b/res/values/supericon_strings.xml
+@@ -7,5 +7,6 @@
+     <string name="supericon_size_normal">Ubah ke 1×1</string>
+     <string name="supericon_style_glass">Gaya kaca</string>
+     <string name="supericon_style_solid">Gaya warna</string>
++    <string name="supericon_customize">Sesuaikan…</string>
+     <string name="supericon_no_space">Tidak ada ruang kosong di sekitar ikon</string>
+ </resources>
+diff --git a/src/com/android/launcher3/popup/SuperIconMenu.java b/src/com/android/launcher3/popup/SuperIconMenu.java
+index 242a23e..b159c58 100644
+--- a/src/com/android/launcher3/popup/SuperIconMenu.java
++++ b/src/com/android/launcher3/popup/SuperIconMenu.java
+@@ -15,6 +15,8 @@
+  */
+ package com.android.launcher3.popup;
+ 
++import android.content.Intent;
++import android.graphics.Bitmap;
+ import android.graphics.Rect;
+ import android.graphics.RectF;
+ import android.view.View;
+@@ -25,9 +27,14 @@ import com.android.launcher3.Launcher;
+ import com.android.launcher3.R;
+ import com.android.launcher3.ShortcutAndWidgetContainer;
+ import com.android.launcher3.WorkspaceItemInfo;
++import com.android.launcher3.supericon.SuperIconEditActivity;
+ import com.android.launcher3.views.OptionsPopupView;
+ import com.android.launcher3.views.OptionsPopupView.OptionItem;
++import com.android.launcher3.views.SuperIconView;
+ 
++import java.io.File;
++import java.io.FileOutputStream;
++import java.io.IOException;
+ import java.util.ArrayList;
+ 
+ /**
+@@ -75,6 +82,13 @@ public final class SuperIconMenu {
+                         return true;
+                     }));
+         }
++        if (isSuper && icon instanceof SuperIconView) {
++            items.add(new OptionItem(R.string.supericon_customize, R.drawable.ic_widget, 0,
++                    v -> {
++                        customize(launcher, info, (SuperIconView) icon);
++                        return true;
++                    }));
++        }
+         if (isSuper) {
+             final boolean solid = WorkspaceItemInfo.isSolidStyle(currentStyle);
+             final int otherStyle = solid
+@@ -90,6 +104,36 @@ public final class SuperIconMenu {
+         OptionsPopupView.show(launcher, new RectF(rect), items);
+     }
+ 
++    /** Opens the editor for the supericon's image, label colour, size and position. */
++    private static void customize(Launcher launcher, WorkspaceItemInfo info, SuperIconView view) {
++        Intent i = new Intent(launcher, SuperIconEditActivity.class);
++        i.putExtra(SuperIconEditActivity.EXTRA_ID, info.id);
++        i.putExtra(SuperIconEditActivity.EXTRA_LABEL,
++                info.title == null ? "" : info.title.toString());
++        i.putExtra(SuperIconEditActivity.EXTRA_SOLID,
++                WorkspaceItemInfo.isSolidStyle(info.superStyle));
++        i.putExtra(SuperIconEditActivity.EXTRA_CARD, info.spanY > 1);
++        i.putExtra(SuperIconEditActivity.EXTRA_W, view.getWidth());
++        i.putExtra(SuperIconEditActivity.EXTRA_H, view.getHeight());
++        i.putExtra(SuperIconEditActivity.EXTRA_REGULAR, view.getRegularIconSizePx());
++        i.putExtra(SuperIconEditActivity.EXTRA_TEXT_SIZE, view.getBaseTextSizePx());
++        i.putExtra(SuperIconEditActivity.EXTRA_TINT,
++                info.iconColor != 0 ? (info.iconColor | 0xFF000000) : 0xFF5F5E5A);
++        i.putExtra(SuperIconEditActivity.EXTRA_DEFAULT_COLOR, view.getDefaultLabelColor());
++        i.putExtra(SuperIconEditActivity.EXTRA_RATIO, SuperIconView.cornerRatio());
++        Bitmap bmp = info.iconBitmap;
++        if (bmp != null) {
++            File f = new File(launcher.getCacheDir(), "supericon_icon_" + info.id + ".png");
++            try (FileOutputStream os = new FileOutputStream(f)) {
++                bmp.compress(Bitmap.CompressFormat.PNG, 100, os);
++                i.putExtra(SuperIconEditActivity.EXTRA_ICON, f.getAbsolutePath());
++            } catch (IOException e) {
++                // The preview is simply drawn without the icon
++            }
++        }
++        launcher.startActivity(i);
++    }
++
+     /**
+      * Finds a free region of the given size that contains the cell (cellX, cellY), preferring
+      * to keep the origin and grow to the right and downwards. The icon's own cells must already
+diff --git a/src/com/android/launcher3/supericon/SuperIconEditActivity.java b/src/com/android/launcher3/supericon/SuperIconEditActivity.java
+new file mode 100644
+index 0000000..03c06db
+--- /dev/null
++++ b/src/com/android/launcher3/supericon/SuperIconEditActivity.java
+@@ -0,0 +1,487 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.launcher3.supericon;
++
++import android.app.Activity;
++import android.content.Context;
++import android.content.Intent;
++import android.graphics.Bitmap;
++import android.graphics.BitmapFactory;
++import android.graphics.Canvas;
++import android.graphics.Color;
++import android.graphics.Paint;
++import android.graphics.drawable.GradientDrawable;
++import android.os.Bundle;
++import android.text.Layout;
++import android.text.StaticLayout;
++import android.text.TextPaint;
++import android.view.Gravity;
++import android.view.View;
++import android.view.ViewGroup;
++import android.widget.Button;
++import android.widget.CheckBox;
++import android.widget.LinearLayout;
++import android.widget.ScrollView;
++import android.widget.SeekBar;
++import android.widget.TextView;
++import android.widget.Toast;
++
++import java.io.File;
++
++/**
++ * Editor for one supericon: background image (import, zoom, pan, dimming), label colour, size
++ * and position, and icon visibility. Opened from the supericon menu with the item's id and the
++ * size of its view; the preview uses the same geometry as the workspace view.
++ */
++public class SuperIconEditActivity extends Activity {
++
++    public static final String EXTRA_ID = "id";
++    public static final String EXTRA_LABEL = "label";
++    public static final String EXTRA_SOLID = "solid";
++    public static final String EXTRA_CARD = "card";
++    public static final String EXTRA_W = "w";
++    public static final String EXTRA_H = "h";
++    public static final String EXTRA_REGULAR = "regular";
++    public static final String EXTRA_TEXT_SIZE = "textSize";
++    public static final String EXTRA_TINT = "tint";
++    public static final String EXTRA_DEFAULT_COLOR = "defColor";
++    public static final String EXTRA_RATIO = "ratio";
++    public static final String EXTRA_ICON = "icon";
++
++    private static final int REQ_PICK = 1;
++    private static final int[] SWATCHES = {
++            0, Color.WHITE, Color.BLACK, 0xFFFFD60A, 0xFFFF6B9D, 0xFF64D2FF, 0xFF30D158};
++
++    private interface OnValue {
++        void on(int value);
++    }
++
++    private long mId;
++    private SuperIconSettings mSettings;
++    private File mPending;
++    private boolean mRemoveImage;
++    private Preview mPreview;
++    private SeekBar mZoom, mPanX, mPanY, mDim, mLabelSize;
++    private CheckBox mShowIcon;
++    private final View[] mSwatchViews = new View[SWATCHES.length];
++    private final Button[] mGrid = new Button[9];
++    private float mD;
++
++    @Override
++    protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        Intent in = getIntent();
++        mId = in.getLongExtra(EXTRA_ID, -1);
++        if (mId < 0) {
++            finish();
++            return;
++        }
++        mD = getResources().getDisplayMetrics().density;
++        mSettings = SuperIconSettings.load(this, mId);
++
++        mPreview = new Preview(this);
++        mPreview.solid = in.getBooleanExtra(EXTRA_SOLID, true);
++        mPreview.card = in.getBooleanExtra(EXTRA_CARD, false);
++        mPreview.vw = Math.max(1, in.getIntExtra(EXTRA_W, 1));
++        mPreview.vh = Math.max(1, in.getIntExtra(EXTRA_H, 1));
++        mPreview.regular = in.getIntExtra(EXTRA_REGULAR, (int) (56 * mD));
++        mPreview.baseText = in.getFloatExtra(EXTRA_TEXT_SIZE, 12 * mD);
++        mPreview.tint = in.getIntExtra(EXTRA_TINT, 0xFF5F5E5A);
++        mPreview.defColor = in.getIntExtra(EXTRA_DEFAULT_COLOR, Color.WHITE);
++        mPreview.ratio = in.getFloatExtra(EXTRA_RATIO, 0.5f);
++        String label = in.getStringExtra(EXTRA_LABEL);
++        mPreview.label = label == null ? "" : label;
++        String iconPath = in.getStringExtra(EXTRA_ICON);
++        if (iconPath != null) {
++            mPreview.icon = BitmapFactory.decodeFile(iconPath);
++        }
++        mPreview.settings = mSettings;
++        mPreview.image = SuperIconSettings.loadImage(this, mId);
++
++        LinearLayout root = new LinearLayout(this);
++        root.setOrientation(LinearLayout.VERTICAL);
++        int pad = (int) (16 * mD);
++        root.setPadding(pad, pad, pad, pad);
++
++        TextView title = new TextView(this);
++        title.setText("Sesuaikan supericon");
++        title.setTextSize(20);
++        root.addView(title);
++
++        LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(
++                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        pl.topMargin = pad;
++        pl.bottomMargin = pad / 2;
++        root.addView(mPreview, pl);
++
++        LinearLayout imgButtons = row();
++        imgButtons.addView(button("Pilih gambar", v -> pickImage()), weight());
++        imgButtons.addView(button("Hapus gambar", v -> {
++            mPreview.image = null;
++            mRemoveImage = true;
++            if (mPending != null) {
++                mPending.delete();
++                mPending = null;
++            }
++            mPreview.invalidate();
++        }), weight());
++        root.addView(imgButtons);
++
++        root.addView(section("Gambar latar"));
++        mZoom = seek(root, "Perbesar", 0, 200, 0, v -> {
++            mSettings.imageZoom = 1f + v / 100f;
++            mPreview.invalidate();
++        });
++        mPanX = seek(root, "Geser mendatar", 0, 200, 0, v -> {
++            mSettings.imageX = (v - 100) / 100f;
++            mPreview.invalidate();
++        });
++        mPanY = seek(root, "Geser tegak", 0, 200, 0, v -> {
++            mSettings.imageY = (v - 100) / 100f;
++            mPreview.invalidate();
++        });
++        mDim = seek(root, "Gelapkan gambar", 0, 80, 0, v -> {
++            mSettings.imageDim = v;
++            mPreview.invalidate();
++        });
++
++        root.addView(section("Label"));
++        LinearLayout swatches = row();
++        for (int i = 0; i < SWATCHES.length; i++) {
++            final int color = SWATCHES[i];
++            TextView sw = new TextView(this);
++            sw.setGravity(Gravity.CENTER);
++            sw.setText(color == 0 ? "A" : "");
++            sw.setTextColor(Color.BLACK);
++            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
++                    (int) (36 * mD), (int) (36 * mD));
++            lp.rightMargin = (int) (8 * mD);
++            sw.setOnClickListener(v -> {
++                mSettings.labelColor = color;
++                refreshSwatches();
++                mPreview.invalidate();
++            });
++            mSwatchViews[i] = sw;
++            swatches.addView(sw, lp);
++        }
++        root.addView(swatches);
++        mLabelSize = seek(root, "Ukuran label (%)", 50, 160, 100, v -> {
++            mSettings.labelScale = v / 100f;
++            mPreview.invalidate();
++        });
++
++        TextView posLabel = new TextView(this);
++        posLabel.setText("Letak label");
++        root.addView(posLabel);
++        LinearLayout grid = new LinearLayout(this);
++        grid.setOrientation(LinearLayout.VERTICAL);
++        for (int r = 0; r < 3; r++) {
++            LinearLayout line = row();
++            for (int c = 0; c < 3; c++) {
++                final int vv = r;
++                final int hh = c;
++                Button b = button("", v -> {
++                    mSettings.labelH = hh;
++                    mSettings.labelV = vv;
++                    refreshGrid();
++                    mPreview.invalidate();
++                });
++                mGrid[r * 3 + c] = b;
++                line.addView(b, new LinearLayout.LayoutParams((int) (56 * mD),
++                        (int) (44 * mD)));
++            }
++            grid.addView(line);
++        }
++        root.addView(grid);
++        root.addView(button("Letak bawaan", v -> {
++            mSettings.labelH = -1;
++            mSettings.labelV = -1;
++            refreshGrid();
++            mPreview.invalidate();
++        }));
++
++        mShowIcon = new CheckBox(this);
++        mShowIcon.setText("Tampilkan ikon");
++        mShowIcon.setOnCheckedChangeListener((b, checked) -> {
++            mSettings.showIcon = checked;
++            mPreview.invalidate();
++        });
++        root.addView(mShowIcon);
++
++        LinearLayout actions = row();
++        actions.addView(button("Atur ulang", v -> resetAll()), weight());
++        actions.addView(button("Batal", v -> cancel()), weight());
++        actions.addView(button("Simpan", v -> save()), weight());
++        LinearLayout.LayoutParams al = new LinearLayout.LayoutParams(
++                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        al.topMargin = pad;
++        root.addView(actions, al);
++
++        ScrollView scroll = new ScrollView(this);
++        scroll.addView(root);
++        setContentView(scroll);
++        syncControls();
++    }
++
++    // ------------------------------------------------------------ UI helpers
++
++    private LinearLayout row() {
++        LinearLayout l = new LinearLayout(this);
++        l.setOrientation(LinearLayout.HORIZONTAL);
++        return l;
++    }
++
++    private LinearLayout.LayoutParams weight() {
++        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
++    }
++
++    private Button button(String text, View.OnClickListener l) {
++        Button b = new Button(this);
++        b.setText(text);
++        b.setAllCaps(false);
++        b.setOnClickListener(l);
++        return b;
++    }
++
++    private TextView section(String text) {
++        TextView t = new TextView(this);
++        t.setText(text);
++        t.setTextSize(16);
++        t.setPadding(0, (int) (16 * mD), 0, (int) (4 * mD));
++        return t;
++    }
++
++    private SeekBar seek(LinearLayout parent, String label, int min, int max, int unused,
++            OnValue cb) {
++        TextView t = new TextView(this);
++        t.setText(label);
++        parent.addView(t);
++        SeekBar s = new SeekBar(this);
++        s.setMax(max - min);
++        s.setTag(min);
++        s.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
++            @Override
++            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
++                if (fromUser) {
++                    cb.on(progress + min);
++                }
++            }
++
++            @Override
++            public void onStartTrackingTouch(SeekBar bar) { }
++
++            @Override
++            public void onStopTrackingTouch(SeekBar bar) { }
++        });
++        parent.addView(s);
++        return s;
++    }
++
++    private static void setSeek(SeekBar bar, int value) {
++        bar.setProgress(value - (Integer) bar.getTag());
++    }
++
++    /** Pushes the current settings into the controls. */
++    private void syncControls() {
++        setSeek(mZoom, Math.round((mSettings.imageZoom - 1f) * 100));
++        setSeek(mPanX, Math.round(mSettings.imageX * 100) + 100);
++        setSeek(mPanY, Math.round(mSettings.imageY * 100) + 100);
++        setSeek(mDim, mSettings.imageDim);
++        setSeek(mLabelSize, Math.round(mSettings.labelScale * 100));
++        mShowIcon.setChecked(mSettings.showIcon);
++        refreshSwatches();
++        refreshGrid();
++        mPreview.settings = mSettings;
++        mPreview.invalidate();
++    }
++
++    private void refreshSwatches() {
++        for (int i = 0; i < SWATCHES.length; i++) {
++            GradientDrawable g = new GradientDrawable();
++            g.setShape(GradientDrawable.OVAL);
++            g.setColor(SWATCHES[i] == 0 ? 0xFFDDDDDD : SWATCHES[i]);
++            boolean on = SWATCHES[i] == mSettings.labelColor;
++            g.setStroke((int) ((on ? 3 : 1) * mD), on ? 0xFF1A73E8 : 0xFF888888);
++            mSwatchViews[i].setBackground(g);
++        }
++    }
++
++    private void refreshGrid() {
++        int h = mSettings.effectiveH();
++        int v = mSettings.effectiveV(mPreview.card);
++        for (int r = 0; r < 3; r++) {
++            for (int c = 0; c < 3; c++) {
++                mGrid[r * 3 + c].setText(r == v && c == h ? "●" : "○");
++            }
++        }
++    }
++
++    // --------------------------------------------------------------- actions
++
++    private void pickImage() {
++        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
++        i.setType("image/*");
++        i.addCategory(Intent.CATEGORY_OPENABLE);
++        try {
++            startActivityForResult(i, REQ_PICK);
++        } catch (RuntimeException e) {
++            Toast.makeText(this, "Tidak ada aplikasi untuk memilih gambar", Toast.LENGTH_SHORT)
++                    .show();
++        }
++    }
++
++    @Override
++    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
++        super.onActivityResult(requestCode, resultCode, data);
++        if (requestCode != REQ_PICK || resultCode != RESULT_OK || data == null
++                || data.getData() == null) {
++            return;
++        }
++        final Context ctx = getApplicationContext();
++        final File dest = SuperIconSettings.tempImageFile(ctx, mId);
++        final android.net.Uri uri = data.getData();
++        new Thread(() -> {
++            final boolean ok = SuperIconSettings.importImage(ctx, uri, dest);
++            runOnUiThread(() -> {
++                if (isFinishing()) {
++                    return;
++                }
++                Bitmap b = ok ? BitmapFactory.decodeFile(dest.getAbsolutePath()) : null;
++                if (b == null) {
++                    Toast.makeText(this, "Gambar tidak bisa dibuka", Toast.LENGTH_SHORT).show();
++                    return;
++                }
++                mPending = dest;
++                mRemoveImage = false;
++                mPreview.image = b;
++                mPreview.invalidate();
++            });
++        }).start();
++    }
++
++    private void resetAll() {
++        mSettings = new SuperIconSettings();
++        mPreview.image = null;
++        mRemoveImage = true;
++        if (mPending != null) {
++            mPending.delete();
++            mPending = null;
++        }
++        syncControls();
++    }
++
++    private void cancel() {
++        SuperIconSettings.tempImageFile(this, mId).delete();
++        finish();
++    }
++
++    private void save() {
++        File fin = SuperIconSettings.imageFile(this, mId);
++        if (mRemoveImage) {
++            fin.delete();
++        }
++        if (mPending != null && mPending.exists()) {
++            fin.delete();
++            if (!mPending.renameTo(fin)) {
++                Toast.makeText(this, "Gambar gagal disimpan", Toast.LENGTH_SHORT).show();
++            }
++        }
++        mSettings.save(this, mId);
++        SuperIconSettings.notifyChanged(mId);
++        finish();
++    }
++
++    @Override
++    protected void onDestroy() {
++        super.onDestroy();
++        if (mId >= 0 && !isChangingConfigurations()) {
++            SuperIconSettings.tempImageFile(this, mId).delete();
++        }
++    }
++
++    // --------------------------------------------------------------- preview
++
++    /** Draws a supericon at the size of the real view, scaled to the width available. */
++    private static class Preview extends View {
++        final SuperIconLayout lay = new SuperIconLayout();
++        final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
++        final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
++        final Paint backPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
++        final TextPaint text = new TextPaint(Paint.ANTI_ALIAS_FLAG);
++        final float d;
++        SuperIconSettings settings;
++        Bitmap image;
++        Bitmap icon;
++        String label = "";
++        boolean solid;
++        boolean card;
++        int tint;
++        int defColor;
++        int vw = 1;
++        int vh = 1;
++        int regular;
++        float baseText;
++        float ratio = 0.5f;
++
++        Preview(Context c) {
++            super(c);
++            d = c.getResources().getDisplayMetrics().density;
++            stroke.setStyle(Paint.Style.STROKE);
++            stroke.setStrokeWidth(d);
++            backPaint.setColor(0xFF6B6F76);
++        }
++
++        @Override
++        protected void onMeasure(int wSpec, int hSpec) {
++            int w = MeasureSpec.getSize(wSpec);
++            setMeasuredDimension(w, Math.round(w * vh / (float) vw));
++        }
++
++        @Override
++        protected void onDraw(Canvas canvas) {
++            float k = getWidth() / (float) vw;
++            canvas.drawRoundRect(0, 0, getWidth(), getHeight(), 16 * d, 16 * d, backPaint);
++            canvas.save();
++            canvas.scale(k, k);
++            lay.compute(vw, vh, card, solid, settings.showIcon, regular, d * 1f, ratio);
++            lay.drawBackground(canvas, solid, tint, image, settings, fill, stroke, d);
++            if (settings.showIcon && icon != null) {
++                canvas.drawBitmap(icon, null, lay.icon, null);
++            }
++
++            text.setTextSize(baseText * settings.labelScale);
++            text.setColor(settings.resolveLabelColor(solid, tint, image != null, defColor));
++            int boxW = Math.max(1, vw - lay.padStart - lay.padEnd);
++            int h = settings.effectiveH();
++            int v = settings.effectiveV(card);
++            Layout.Alignment align = h == 0 ? Layout.Alignment.ALIGN_NORMAL
++                    : (h == 1 ? Layout.Alignment.ALIGN_CENTER : Layout.Alignment.ALIGN_OPPOSITE);
++            String shown = label;
++            StaticLayout sl = new StaticLayout(shown, text, boxW, align, 1f, 0f, false);
++            if (sl.getLineCount() > 2) {
++                int end = Math.max(1, sl.getLineEnd(1) - 1);
++                shown = label.substring(0, Math.min(end, label.length())).trim() + "…";
++                sl = new StaticLayout(shown, text, boxW, align, 1f, 0f, false);
++            }
++            float boxH = vh - lay.padTop - lay.padBottom;
++            float y = lay.padTop + (v == 0 ? 0 : (v == 1 ? (boxH - sl.getHeight()) / 2f
++                    : boxH - sl.getHeight()));
++            canvas.translate(lay.padStart, y);
++            sl.draw(canvas);
++            canvas.restore();
++        }
++    }
++}
+diff --git a/src/com/android/launcher3/supericon/SuperIconLayout.java b/src/com/android/launcher3/supericon/SuperIconLayout.java
+new file mode 100644
+index 0000000..1cededd
+--- /dev/null
++++ b/src/com/android/launcher3/supericon/SuperIconLayout.java
+@@ -0,0 +1,99 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.launcher3.supericon;
++
++import android.graphics.Bitmap;
++import android.graphics.Canvas;
++import android.graphics.Color;
++import android.graphics.Paint;
++import android.graphics.Rect;
++import android.graphics.RectF;
++
++/**
++ * Geometry of a supericon, shared by the workspace view and the editor preview so that the two
++ * match: the pill, the icon, and the box the label is laid out in.
++ */
++public final class SuperIconLayout {
++
++    public final RectF pill = new RectF();
++    public final Rect icon = new Rect();
++    public float radius;
++    public int iconSize;
++    /** Padding that defines the label's box, in view coordinates. */
++    public int padStart;
++    public int padTop;
++    public int padEnd;
++    public int padBottom;
++
++    /**
++     * @param card true for the 2x2 size (icon top-left, label below), false for one-row pills
++     * @param regularIcon size of a regular workspace icon, in px
++     * @param d display density
++     * @param cornerRatio 0..0.5 corner radius as a fraction of the one-row pill height
++     */
++    public void compute(int w, int h, boolean card, boolean solid, boolean showIcon,
++            int regularIcon, float d, float cornerRatio) {
++        float side = 3 * d;
++        int rows = card ? 2 : 1;
++        float rowH = h / (float) rows;
++        float base = Math.min(rowH, regularIcon + 14 * d);
++        float vIn = (rowH - base) / 2f;
++        pill.set(side, vIn, w - side, h - vIn);
++        radius = Math.min(cornerRatio * base, Math.min(pill.width(), pill.height()) / 2f);
++
++        iconSize = card ? regularIcon : Math.round(regularIcon * 0.78f);
++        float inset = (card ? 14 : (solid ? 12 : 9)) * d;
++        int left = (int) (pill.left + inset);
++        int top = card ? (int) (pill.top + inset)
++                : (int) (pill.top + (pill.height() - iconSize) / 2f);
++        icon.set(left, top, left + iconSize, top + iconSize);
++
++        padEnd = (int) (11 * d);
++        if (card) {
++            padStart = (int) (pill.left + inset);
++            padTop = showIcon ? (int) (icon.bottom + 4 * d) : (int) (pill.top + 8 * d);
++            padBottom = (int) (h - pill.bottom + 12 * d);
++        } else {
++            float gap = (solid ? 10 : 7) * d;
++            padStart = showIcon ? (int) (icon.right + gap) : (int) (pill.left + 14 * d);
++            padTop = (int) (pill.top + 6 * d);
++            padBottom = (int) (h - pill.bottom + 6 * d);
++        }
++    }
++
++    /** Draws the pill: the image if there is one, else solid or glass; then the icon's ring. */
++    public void drawBackground(Canvas canvas, boolean solid, int tint, Bitmap image,
++            SuperIconSettings s, Paint fill, Paint stroke, float d) {
++        if (image != null) {
++            SuperIconSettings.drawImage(canvas, image, pill, radius, s);
++        } else if (solid) {
++            fill.setColor(tint);
++            canvas.drawRoundRect(pill, radius, radius, fill);
++        } else {
++            fill.setColor(Color.argb(64, 255, 255, 255));
++            canvas.drawRoundRect(pill, radius, radius, fill);
++        }
++        if (!solid && image == null) {
++            stroke.setColor(Color.argb(80, 255, 255, 255));
++            canvas.drawRoundRect(pill, radius, radius, stroke);
++        }
++        if (solid && s.showIcon) {
++            fill.setColor(Color.argb(235, 255, 255, 255));
++            canvas.drawCircle(icon.exactCenterX(), icon.exactCenterY(),
++                    icon.width() / 2f + 3 * d, fill);
++        }
++    }
++}
+diff --git a/src/com/android/launcher3/supericon/SuperIconSettings.java b/src/com/android/launcher3/supericon/SuperIconSettings.java
+new file mode 100644
+index 0000000..7ff2471
+--- /dev/null
++++ b/src/com/android/launcher3/supericon/SuperIconSettings.java
+@@ -0,0 +1,306 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.launcher3.supericon;
++
++import android.content.Context;
++import android.content.SharedPreferences;
++import android.graphics.Bitmap;
++import android.graphics.BitmapFactory;
++import android.graphics.Canvas;
++import android.graphics.Color;
++import android.graphics.Paint;
++import android.graphics.Path;
++import android.graphics.RectF;
++import android.net.Uri;
++import android.util.LruCache;
++
++import androidx.core.graphics.ColorUtils;
++
++import org.json.JSONException;
++import org.json.JSONObject;
++
++import java.io.File;
++import java.io.FileOutputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.Set;
++import java.util.WeakHashMap;
++
++/**
++ * Per-supericon customisation: background image (zoom, pan, dimming), label colour, size and
++ * position, and icon visibility. Stored in SharedPreferences (one JSON string per item id); the
++ * background image is a PNG in the app's files directory.
++ */
++public final class SuperIconSettings {
++
++    private static final String PREFS = "supericon_settings";
++    private static final int MAX_IMAGE_SIDE = 1024;
++
++    /** Background image zoom, 1..3. */
++    public float imageZoom = 1f;
++    /** Background image pan, -1..1. */
++    public float imageX = 0f;
++    public float imageY = 0f;
++    /** Darkening on top of the image, 0..80 percent. */
++    public int imageDim = 35;
++    /** Label colour, or 0 for automatic. */
++    public int labelColor = 0;
++    /** Label size multiplier, 0.5..1.6. */
++    public float labelScale = 1f;
++    /** Label position: 0..2 horizontally (start, centre, end) and vertically (top, centre,
++     *  bottom), or -1 for the default of the current size. */
++    public int labelH = -1;
++    public int labelV = -1;
++    public boolean showIcon = true;
++
++    public interface Listener {
++        void onSuperIconSettingsChanged(long itemId);
++    }
++
++    private static final Set<Listener> sListeners =
++            Collections.newSetFromMap(new WeakHashMap<Listener, Boolean>());
++    private static final LruCache<String, Bitmap> sImages = new LruCache<>(6);
++
++    private static final Paint sImagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
++    private static final Paint sDimPaint = new Paint();
++    private static final Path sClip = new Path();
++    private static final RectF sDst = new RectF();
++
++    public SuperIconSettings copy() {
++        SuperIconSettings s = new SuperIconSettings();
++        s.imageZoom = imageZoom;
++        s.imageX = imageX;
++        s.imageY = imageY;
++        s.imageDim = imageDim;
++        s.labelColor = labelColor;
++        s.labelScale = labelScale;
++        s.labelH = labelH;
++        s.labelV = labelV;
++        s.showIcon = showIcon;
++        return s;
++    }
++
++    public int effectiveH() {
++        return labelH >= 0 ? labelH : 0;
++    }
++
++    public int effectiveV(boolean card) {
++        return labelV >= 0 ? labelV : (card ? 2 : 1);
++    }
++
++    /** The label colour to use; {@code defaultColor} applies only to the plain glass style. */
++    public int resolveLabelColor(boolean solid, int tint, boolean hasImage, int defaultColor) {
++        if (labelColor != 0) {
++            return labelColor;
++        }
++        if (hasImage) {
++            return Color.WHITE;
++        }
++        if (solid) {
++            return ColorUtils.calculateLuminance(tint) > 0.55
++                    ? Color.argb(230, 20, 20, 20) : Color.WHITE;
++        }
++        return defaultColor;
++    }
++
++    // ---------------------------------------------------------------- storage
++
++    public static SuperIconSettings load(Context context, long id) {
++        SuperIconSettings s = new SuperIconSettings();
++        String json = prefs(context).getString(key(id), null);
++        if (json == null) {
++            return s;
++        }
++        try {
++            JSONObject o = new JSONObject(json);
++            s.imageZoom = clamp((float) o.optDouble("zoom", 1), 1f, 3f);
++            s.imageX = clamp((float) o.optDouble("x", 0), -1f, 1f);
++            s.imageY = clamp((float) o.optDouble("y", 0), -1f, 1f);
++            s.imageDim = Math.max(0, Math.min(80, o.optInt("dim", 35)));
++            s.labelColor = o.optInt("color", 0);
++            s.labelScale = clamp((float) o.optDouble("scale", 1), 0.5f, 1.6f);
++            s.labelH = Math.max(-1, Math.min(2, o.optInt("h", -1)));
++            s.labelV = Math.max(-1, Math.min(2, o.optInt("v", -1)));
++            s.showIcon = o.optBoolean("icon", true);
++        } catch (JSONException e) {
++            return new SuperIconSettings();
++        }
++        return s;
++    }
++
++    public void save(Context context, long id) {
++        try {
++            JSONObject o = new JSONObject();
++            o.put("zoom", imageZoom);
++            o.put("x", imageX);
++            o.put("y", imageY);
++            o.put("dim", imageDim);
++            o.put("color", labelColor);
++            o.put("scale", labelScale);
++            o.put("h", labelH);
++            o.put("v", labelV);
++            o.put("icon", showIcon);
++            prefs(context).edit().putString(key(id), o.toString()).apply();
++        } catch (JSONException e) {
++            // Nothing sensible to do; the previous settings stay in place
++        }
++    }
++
++    public static void delete(Context context, long id) {
++        prefs(context).edit().remove(key(id)).apply();
++        imageFile(context, id).delete();
++        tempImageFile(context, id).delete();
++    }
++
++    private static SharedPreferences prefs(Context context) {
++        return context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
++    }
++
++    private static String key(long id) {
++        return "s_" + id;
++    }
++
++    // ----------------------------------------------------------------- images
++
++    private static File dir(Context context) {
++        File d = new File(context.getFilesDir(), "supericon");
++        if (!d.exists()) {
++            d.mkdirs();
++        }
++        return d;
++    }
++
++    public static File imageFile(Context context, long id) {
++        return new File(dir(context), id + ".png");
++    }
++
++    public static File tempImageFile(Context context, long id) {
++        return new File(dir(context), id + ".tmp.png");
++    }
++
++    /** The saved background image of an item, or null. */
++    public static Bitmap loadImage(Context context, long id) {
++        return decodeCached(imageFile(context, id));
++    }
++
++    public static Bitmap decodeCached(File f) {
++        if (f == null || !f.exists()) {
++            return null;
++        }
++        String k = f.getAbsolutePath() + "@" + f.lastModified() + "/" + f.length();
++        Bitmap b = sImages.get(k);
++        if (b == null) {
++            b = BitmapFactory.decodeFile(f.getAbsolutePath());
++            if (b != null) {
++                sImages.put(k, b);
++            }
++        }
++        return b;
++    }
++
++    /** Decodes the picked image at a reduced size and writes it to {@code dest} as a PNG. */
++    public static boolean importImage(Context context, Uri uri, File dest) {
++        try {
++            BitmapFactory.Options o = new BitmapFactory.Options();
++            o.inJustDecodeBounds = true;
++            try (InputStream in = context.getContentResolver().openInputStream(uri)) {
++                BitmapFactory.decodeStream(in, null, o);
++            }
++            int sample = 1;
++            int longest = Math.max(o.outWidth, o.outHeight);
++            while (longest / sample > MAX_IMAGE_SIDE * 2) {
++                sample *= 2;
++            }
++            o = new BitmapFactory.Options();
++            o.inSampleSize = sample;
++            Bitmap bmp;
++            try (InputStream in = context.getContentResolver().openInputStream(uri)) {
++                bmp = BitmapFactory.decodeStream(in, null, o);
++            }
++            if (bmp == null) {
++                return false;
++            }
++            int side = Math.max(bmp.getWidth(), bmp.getHeight());
++            if (side > MAX_IMAGE_SIDE) {
++                float f = MAX_IMAGE_SIDE / (float) side;
++                bmp = Bitmap.createScaledBitmap(bmp, Math.max(1, Math.round(bmp.getWidth() * f)),
++                        Math.max(1, Math.round(bmp.getHeight() * f)), true);
++            }
++            dest.getParentFile().mkdirs();
++            try (FileOutputStream out = new FileOutputStream(dest)) {
++                bmp.compress(Bitmap.CompressFormat.PNG, 100, out);
++            }
++            return true;
++        } catch (IOException | RuntimeException | OutOfMemoryError e) {
++            return false;
++        }
++    }
++
++    /** Draws the image cropped to the rounded pill, with the given zoom, pan and dimming. */
++    public static void drawImage(Canvas canvas, Bitmap bmp, RectF pill, float radius,
++            SuperIconSettings s) {
++        float bw = bmp.getWidth();
++        float bh = bmp.getHeight();
++        float scale = Math.max(pill.width() / bw, pill.height() / bh) * s.imageZoom;
++        float sw = bw * scale;
++        float sh = bh * scale;
++        float maxX = (sw - pill.width()) / 2f;
++        float maxY = (sh - pill.height()) / 2f;
++        float left = pill.centerX() - sw / 2f + s.imageX * maxX;
++        float top = pill.centerY() - sh / 2f + s.imageY * maxY;
++        sClip.reset();
++        sClip.addRoundRect(pill, radius, radius, Path.Direction.CW);
++        canvas.save();
++        canvas.clipPath(sClip);
++        sDst.set(left, top, left + sw, top + sh);
++        canvas.drawBitmap(bmp, null, sDst, sImagePaint);
++        if (s.imageDim > 0) {
++            sDimPaint.setColor(Color.argb(s.imageDim * 255 / 100, 0, 0, 0));
++            canvas.drawRect(pill, sDimPaint);
++        }
++        canvas.restore();
++    }
++
++    // -------------------------------------------------------------- listeners
++
++    public static void addListener(Listener l) {
++        synchronized (sListeners) {
++            sListeners.add(l);
++        }
++    }
++
++    public static void removeListener(Listener l) {
++        synchronized (sListeners) {
++            sListeners.remove(l);
++        }
++    }
++
++    public static void notifyChanged(long id) {
++        ArrayList<Listener> copy;
++        synchronized (sListeners) {
++            copy = new ArrayList<>(sListeners);
++        }
++        for (Listener l : copy) {
++            l.onSuperIconSettingsChanged(id);
++        }
++    }
++
++    private static float clamp(float v, float min, float max) {
++        return Math.max(min, Math.min(max, v));
++    }
++}
+diff --git a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android/launcher3/views/SuperIconView.java
+index 11f19e4..8c39980 100644
+--- a/src/com/android/launcher3/views/SuperIconView.java
++++ b/src/com/android/launcher3/views/SuperIconView.java
+@@ -16,11 +16,11 @@
+ package com.android.launcher3.views;
+ 
+ import android.content.Context;
++import android.content.res.ColorStateList;
++import android.graphics.Bitmap;
+ import android.graphics.Canvas;
+-import android.graphics.Color;
+ import android.graphics.Paint;
+ import android.graphics.Rect;
+-import android.graphics.RectF;
+ import android.graphics.Region;
+ import android.graphics.drawable.Drawable;
+ import android.text.TextPaint;
+@@ -29,10 +29,11 @@ import android.util.AttributeSet;
+ import android.util.TypedValue;
+ import android.view.Gravity;
+ 
+-import androidx.core.graphics.ColorUtils;
+ 
+ import com.android.launcher3.WorkspaceItemInfo;
+ import com.android.launcher3.graphics.IconShape;
++import com.android.launcher3.supericon.SuperIconLayout;
++import com.android.launcher3.supericon.SuperIconSettings;
+ 
+ /**
+  * An app icon that spans several cells ("supericon") on the workspace: 2x1, 3x1 or 2x2. The
+@@ -41,30 +42,36 @@ import com.android.launcher3.graphics.IconShape;
+  *
+  * Two styles: a translucent glass pill, and a solid pill tinted with the icon's dominant colour
+  * (the icon sits in a white ring). In the 2x2 size the icon goes in the top-left corner and the
+- * label at the bottom, forming a card.
++ * label below it. Each supericon can also have a background image and its own label colour,
++ * size and position, see {@link SuperIconSettings}.
++ *
++ * The icon is always drawn by {@link #onDraw}, not as a compound drawable, so that its place does
++ * not depend on the label.
+  */
+-public class SuperIconView extends DoubleShadowBubbleTextView {
++public class SuperIconView extends DoubleShadowBubbleTextView
++        implements SuperIconSettings.Listener {
+ 
+     private static IconShape sShape;
+     private static float sCornerRatio = 0.5f;
+ 
+-    /** Icon size inside a one-row pill, relative to the regular workspace icon size. */
+-    private static final float ICON_SCALE = 0.78f;
+-    /** The label never shrinks below this fraction of the regular label size. */
++    /** The label never shrinks below this fraction of its (scaled) size. */
+     private static final float MIN_TEXT_SCALE = 0.78f;
+ 
+     private final Paint mFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+     private final Paint mStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+-    private final RectF mPill = new RectF();
++    private final SuperIconLayout mLayout = new SuperIconLayout();
+     private final TextPaint mMeasurePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+-    private final Rect mTmpBounds = new Rect();
+     private final Rect mOldBounds = new Rect();
+     private final float mDensity;
++    private final ColorStateList mDefaultTextColors;
+ 
++    private long mItemId = -1;
++    private SuperIconSettings mSettings = new SuperIconSettings();
++    private Bitmap mImage;
++    private Drawable mShownIcon;
+     private boolean mSolid;
+     private boolean mCard;
+     private int mTint = 0xFF5F5E5A;
+-    private float mCornerBase;
+     private float mBaseTextSize;
+ 
+     public SuperIconView(Context context) {
+@@ -81,6 +88,7 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         mStrokePaint.setStyle(Paint.Style.STROKE);
+         mStrokePaint.setStrokeWidth(mDensity);
+         mBaseTextSize = getTextSize();
++        mDefaultTextColors = getTextColors();
+     }
+ 
+     /** The label is always shown inside a supericon, even if app labels are hidden. */
+@@ -89,11 +97,39 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         return false;
+     }
+ 
++    @Override
++    protected void onAttachedToWindow() {
++        super.onAttachedToWindow();
++        SuperIconSettings.addListener(this);
++    }
++
++    @Override
++    protected void onDetachedFromWindow() {
++        SuperIconSettings.removeListener(this);
++        super.onDetachedFromWindow();
++    }
++
++    @Override
++    public void onSuperIconSettingsChanged(long itemId) {
++        if (itemId == mItemId) {
++            loadSettings();
++            applyStyle();
++            invalidate();
++        }
++    }
++
++    private void loadSettings() {
++        mSettings = SuperIconSettings.load(getContext(), mItemId);
++        mImage = SuperIconSettings.loadImage(getContext(), mItemId);
++    }
++
+     @Override
+     public void applyFromWorkspaceItem(WorkspaceItemInfo info, boolean promiseStateChanged) {
++        mItemId = info.id;
+         mSolid = WorkspaceItemInfo.isSolidStyle(info.superStyle);
+         mCard = info.spanY > 1;
+-        // Must be set before the icon is applied so the compound drawable gets the right size
++        loadSettings();
++        // Must be set before the icon is applied so the icon gets the right size
+         setIconSize(iconSize());
+         super.applyFromWorkspaceItem(info, promiseStateChanged);
+         mTint = info.iconColor != 0 ? (info.iconColor | 0xFF000000) : 0xFF5F5E5A;
+@@ -101,44 +137,49 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         invalidate();
+     }
+ 
+-    private boolean tintIsLight() {
+-        return ColorUtils.calculateLuminance(mTint) > 0.55;
+-    }
+-
+     private void applyStyle() {
+-        setTextSize(TypedValue.COMPLEX_UNIT_PX, mBaseTextSize);
++        float size = mBaseTextSize * mSettings.labelScale;
++        setTextSize(TypedValue.COMPLEX_UNIT_PX, size);
+         // Allow two lines instead of the single (truncated) line of regular workspace labels
+         setSingleLine(false);
+         setMinLines(1);
+         setMaxLines(2);
+         setEllipsize(TextUtils.TruncateAt.END);
+-        if (mSolid) {
+-            setTextColor(tintIsLight() ? Color.argb(230, 20, 20, 20) : Color.WHITE);
+-        }
+-        if (mCard) {
+-            setGravity(Gravity.BOTTOM | Gravity.START);
+-            setCompoundDrawablePadding(0);
+-            setCompoundDrawables(null, null, null, null);
++
++        int auto = mSettings.resolveLabelColor(mSolid, mTint, mImage != null,
++                mDefaultTextColors.getDefaultColor());
++        if (mSettings.labelColor == 0 && !mSolid && mImage == null) {
++            setTextColor(mDefaultTextColors);
+         } else {
+-            setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+-            setCompoundDrawablePadding((int) ((mSolid ? 10 : 7) * mDensity));
++            setTextColor(auto);
+         }
++
++        int h = mSettings.effectiveH();
++        int v = mSettings.effectiveV(mCard);
++        int gh = h == 0 ? Gravity.START : (h == 1 ? Gravity.CENTER_HORIZONTAL : Gravity.END);
++        int gv = v == 0 ? Gravity.TOP : (v == 1 ? Gravity.CENTER_VERTICAL : Gravity.BOTTOM);
++        setGravity(gh | gv);
++        setCompoundDrawables(null, null, null, null);
+         requestLayout();
+     }
+ 
+-    /** In the card size the icon is drawn by {@link #onDraw}, not as a compound drawable. */
++    /** The icon is drawn by {@link #onDraw}; this only prepares it. */
+     @Override
+     protected void applyCompoundDrawables(Drawable icon) {
+         if (icon == null) {
+             return;
+         }
+-        if (mCard) {
+-            int size = iconSize();
+-            icon.setBounds(0, 0, size, size);
+-            setCompoundDrawables(null, null, null, null);
+-        } else {
+-            super.applyCompoundDrawables(icon);
+-        }
++        int size = iconSize();
++        icon.setBounds(0, 0, size, size);
++        icon.setCallback(this);
++        mShownIcon = icon;
++        setCompoundDrawables(null, null, null, null);
++        invalidate();
++    }
++
++    @Override
++    protected boolean verifyDrawable(Drawable who) {
++        return who == mShownIcon || super.verifyDrawable(who);
+     }
+ 
+     private int regularIconSize() {
+@@ -147,11 +188,11 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+ 
+     /** Icon size: smaller than a regular icon in a one-row pill, to leave room for the label. */
+     private int iconSize() {
+-        return mCard ? regularIconSize() : Math.round(regularIconSize() * ICON_SCALE);
++        return mCard ? regularIconSize() : Math.round(regularIconSize() * 0.78f);
+     }
+ 
+     /** Corner radius as a fraction (0..0.5) of the pill height, from the current icon shape. */
+-    private static float cornerRatio() {
++    public static float cornerRatio() {
+         IconShape shape = IconShape.getShape();
+         if (shape == sShape) {
+             return sCornerRatio;
+@@ -176,9 +217,17 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         return ratio;
+     }
+ 
+-    /** Space between the pill edge and the icon (the icon's ring in the solid style). */
+-    private float iconInset() {
+-        return (mCard ? 14 : (mSolid ? 12 : 9)) * mDensity;
++    /** The label size before the per-icon size setting is applied. */
++    public float getBaseTextSizePx() {
++        return mBaseTextSize;
++    }
++
++    public int getDefaultLabelColor() {
++        return mDefaultTextColors.getDefaultColor();
++    }
++
++    public int getRegularIconSizePx() {
++        return regularIconSize();
+     }
+ 
+     @Override
+@@ -186,25 +235,11 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         int w = MeasureSpec.getSize(widthMeasureSpec);
+         int h = MeasureSpec.getSize(heightMeasureSpec);
+         if (w > 0 && h > 0) {
+-            int size = iconSize();
+-            float sideInset = 3 * mDensity;
+-            int rows = mCard ? 2 : 1;
+-            float rowH = h / (float) rows;
+-            mCornerBase = Math.min(rowH, regularIconSize() + 14 * mDensity);
+-            float vInset = (rowH - mCornerBase) / 2f;
+-            mPill.set(sideInset, vInset, w - sideInset, h - vInset);
+-            int padStart = (int) (mPill.left + iconInset());
+-            int padEnd = (int) (11 * mDensity);
+-            float textAvail;
+-            if (mCard) {
+-                int padBottom = (int) (h - mPill.bottom + 12 * mDensity);
+-                setPaddingRelative(padStart, 0, padEnd, padBottom);
+-                textAvail = w - padStart - padEnd;
+-            } else {
+-                setPaddingRelative(padStart, 0, padEnd, 0);
+-                textAvail = w - padStart - padEnd - size - getCompoundDrawablePadding();
+-            }
+-            fitText(textAvail);
++            mLayout.compute(w, h, mCard, mSolid, mSettings.showIcon, regularIconSize(), mDensity,
++                    cornerRatio());
++            setPaddingRelative(mLayout.padStart, mLayout.padTop, mLayout.padEnd,
++                    mLayout.padBottom);
++            fitText(w - mLayout.padStart - mLayout.padEnd);
+         }
+         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+     }
+@@ -218,8 +253,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         if (text == null || text.length() == 0 || available <= 0) {
+             return;
+         }
+-        float minSize = mBaseTextSize * MIN_TEXT_SCALE;
+-        float size = mBaseTextSize;
++        float target = mBaseTextSize * mSettings.labelScale;
++        float minSize = target * MIN_TEXT_SCALE;
++        float size = target;
+         mMeasurePaint.set(getPaint());
+         mMeasurePaint.setTypeface(getPaint().getTypeface());
+         String[] words = text.toString().split("\\s+");
+@@ -242,48 +278,21 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+ 
+     @Override
+     public void getIconBounds(Rect outBounds) {
+-        int size = iconSize();
+-        int left = (int) (mPill.left + iconInset());
+-        int top = mCard
+-                ? (int) (mPill.top + iconInset())
+-                : (int) (mPill.top + (mPill.height() - size) / 2f);
+-        outBounds.set(left, top, left + size, top + size);
++        outBounds.set(mLayout.icon);
+     }
+ 
+     @Override
+     public void onDraw(Canvas canvas) {
+-        if (mPill.width() > 0) {
+-            float r = Math.min(cornerRatio() * mCornerBase,
+-                    Math.min(mPill.width(), mPill.height()) / 2f);
+-            if (mSolid) {
+-                mFillPaint.setColor(mTint);
+-                canvas.drawRoundRect(mPill, r, r, mFillPaint);
+-                getIconBounds(mTmpBounds);
+-                mFillPaint.setColor(Color.argb(235, 255, 255, 255));
+-                canvas.drawCircle(mTmpBounds.exactCenterX(), mTmpBounds.exactCenterY(),
+-                        mTmpBounds.width() / 2f + 3 * mDensity, mFillPaint);
+-            } else {
+-                mFillPaint.setColor(Color.argb(64, 255, 255, 255));
+-                canvas.drawRoundRect(mPill, r, r, mFillPaint);
+-                mStrokePaint.setColor(Color.argb(80, 255, 255, 255));
+-                canvas.drawRoundRect(mPill, r, r, mStrokePaint);
+-            }
+-            if (mCard) {
+-                drawCardIcon(canvas);
++        if (mLayout.pill.width() > 0) {
++            mLayout.drawBackground(canvas, mSolid, mTint, mImage, mSettings, mFillPaint,
++                    mStrokePaint, mDensity);
++            if (mSettings.showIcon && mShownIcon != null) {
++                mOldBounds.set(mShownIcon.getBounds());
++                mShownIcon.setBounds(mLayout.icon);
++                mShownIcon.draw(canvas);
++                mShownIcon.setBounds(mOldBounds);
+             }
+         }
+         super.onDraw(canvas);
+     }
+-
+-    private void drawCardIcon(Canvas canvas) {
+-        Drawable icon = getIcon();
+-        if (icon == null) {
+-            return;
+-        }
+-        getIconBounds(mTmpBounds);
+-        mOldBounds.set(icon.getBounds());
+-        icon.setBounds(mTmpBounds);
+-        icon.draw(canvas);
+-        icon.setBounds(mOldBounds);
+-    }
+ }
