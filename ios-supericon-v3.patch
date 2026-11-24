@@ -1,11 +1,17 @@
 diff --git a/lawnchair/AndroidManifest.xml b/lawnchair/AndroidManifest.xml
-index 3e34e42..6f6b520 100644
+index 3e34e42..254728e 100644
 --- a/lawnchair/AndroidManifest.xml
 +++ b/lawnchair/AndroidManifest.xml
-@@ -99,6 +99,12 @@
+@@ -99,6 +99,18 @@
          android:networkSecurityConfig="@xml/network_security_config"
          android:name="ch.deletescape.lawnchair.LawnchairApp">
  
++        <activity
++            android:name="com.android.launcher3.supericon.SuperIconBackupActivity"
++            android:excludeFromRecents="true"
++            android:exported="false"
++            android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"/>
++
 +        <activity
 +            android:name="com.android.launcher3.supericon.SuperIconEditActivity"
 +            android:excludeFromRecents="true"
@@ -16,18 +22,43 @@ index 3e34e42..6f6b520 100644
              android:excludeFromRecents="true"
              android:name="ch.deletescape.lawnchair.LawnchairLauncher$Screenshot"
 diff --git a/res/values/supericon_strings.xml b/res/values/supericon_strings.xml
-index 35aa42d..6906f46 100644
+index 35aa42d..607f72a 100644
 --- a/res/values/supericon_strings.xml
 +++ b/res/values/supericon_strings.xml
-@@ -7,5 +7,6 @@
+@@ -1,11 +1,9 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+     <string name="supericon_menu">Supericon</string>
+-    <string name="supericon_size_2x1">Ubah ke 2×1</string>
+-    <string name="supericon_size_3x1">Ubah ke 3×1</string>
+-    <string name="supericon_size_2x2">Ubah ke 2×2</string>
++    <string name="supericon_make">Jadikan supericon</string>
      <string name="supericon_size_normal">Ubah ke 1×1</string>
-     <string name="supericon_style_glass">Gaya kaca</string>
-     <string name="supericon_style_solid">Gaya warna</string>
+-    <string name="supericon_style_glass">Gaya kaca</string>
+-    <string name="supericon_style_solid">Gaya warna</string>
 +    <string name="supericon_customize">Sesuaikan…</string>
++    <string name="supericon_backup">Cadangan supericon…</string>
      <string name="supericon_no_space">Tidak ada ruang kosong di sekitar ikon</string>
  </resources>
+diff --git a/src/com/android/launcher3/WorkspaceItemInfo.java b/src/com/android/launcher3/WorkspaceItemInfo.java
+index bb432f0..58c1e62 100644
+--- a/src/com/android/launcher3/WorkspaceItemInfo.java
++++ b/src/com/android/launcher3/WorkspaceItemInfo.java
+@@ -89,9 +89,10 @@ public class WorkspaceItemInfo extends ItemInfoWithIcon {
+         return style == SUPER_STYLE_SOLID || style == SUPER_STYLE_LEGACY;
+     }
+ 
+-    /** Whether a span is one of the sizes a supericon can take: 2x1, 3x1 or 2x2. */
++    /** Whether a span is a size a supericon can take: 2x1, 3x1, 4x1, 2x2 or 1x2. */
+     public static boolean isSuperSpan(int spanX, int spanY) {
+-        return (spanY == 1 && (spanX == 2 || spanX == 3)) || (spanX == 2 && spanY == 2);
++        return (spanY == 1 && spanX >= 2 && spanX <= 4) || (spanX == 2 && spanY == 2)
++                || (spanX == 1 && spanY == 2);
+     }
+ 
+     /**
 diff --git a/src/com/android/launcher3/popup/SuperIconMenu.java b/src/com/android/launcher3/popup/SuperIconMenu.java
-index 242a23e..b0582b1 100644
+index 242a23e..d7080db 100644
 --- a/src/com/android/launcher3/popup/SuperIconMenu.java
 +++ b/src/com/android/launcher3/popup/SuperIconMenu.java
 @@ -15,6 +15,8 @@
@@ -39,11 +70,13 @@ index 242a23e..b0582b1 100644
  import android.graphics.Rect;
  import android.graphics.RectF;
  import android.view.View;
-@@ -25,9 +27,14 @@ import com.android.launcher3.Launcher;
+@@ -25,20 +27,27 @@ import com.android.launcher3.Launcher;
  import com.android.launcher3.R;
  import com.android.launcher3.ShortcutAndWidgetContainer;
  import com.android.launcher3.WorkspaceItemInfo;
++import com.android.launcher3.supericon.SuperIconBackupActivity;
 +import com.android.launcher3.supericon.SuperIconEditActivity;
++import com.android.launcher3.supericon.SuperIconSettings;
  import com.android.launcher3.views.OptionsPopupView;
  import com.android.launcher3.views.OptionsPopupView.OptionItem;
 +import com.android.launcher3.views.SuperIconView;
@@ -51,28 +84,80 @@ index 242a23e..b0582b1 100644
 +import java.io.File;
 +import java.io.FileOutputStream;
 +import java.io.IOException;
++import java.lang.ref.WeakReference;
  import java.util.ArrayList;
  
  /**
-@@ -75,6 +82,13 @@ public final class SuperIconMenu {
+- * Menu for turning a workspace app icon into a supericon (2x1, 3x1 or 2x2), choosing its size
+- * and its style (glass or solid).
++ * Menu for supericons (app icons that span several cells). A regular icon can be turned into a
++ * supericon; a supericon opens its editor, which also chooses its size and style, can go back to
++ * a regular icon, or opens the backup screen.
+  */
+ public final class SuperIconMenu {
+ 
+-    private static final int[][] SIZES = {{2, 1}, {3, 1}, {2, 2}};
+-    private static final int[] SIZE_LABELS = {
+-            R.string.supericon_size_2x1, R.string.supericon_size_3x1, R.string.supericon_size_2x2};
++    private static WeakReference<Launcher> sLauncher = new WeakReference<>(null);
+ 
+     private SuperIconMenu() { }
+ 
+@@ -47,47 +56,95 @@ public final class SuperIconMenu {
+         if (icon == null) {
+             return;
+         }
++        sLauncher = new WeakReference<>(launcher);
+         Rect rect = new Rect();
+         launcher.getDragLayer().getDescendantRectRelativeToSelf(icon, rect);
+ 
+-        final boolean isSuper = info.isSuperIcon();
+-        final int currentStyle = isSuper ? info.superStyle : WorkspaceItemInfo.SUPER_NONE;
+-        // A new supericon starts with the solid style; an existing one keeps its style.
+-        final int style = isSuper ? currentStyle : WorkspaceItemInfo.SUPER_STYLE_SOLID;
+-
+         ArrayList<OptionItem> items = new ArrayList<>();
+-        if (isSuper) {
++        if (!info.isSuperIcon()) {
++            items.add(new OptionItem(R.string.supericon_make, R.drawable.ic_widget, 0, v -> {
++                String error = tryApply(launcher, info, WorkspaceItemInfo.SUPER_STYLE_SOLID, 2, 1);
++                if (error != null) {
++                    Toast.makeText(launcher, error, Toast.LENGTH_SHORT).show();
++                }
++                return true;
++            }));
++        } else {
++            if (icon instanceof SuperIconView) {
++                items.add(new OptionItem(R.string.supericon_customize, R.drawable.ic_widget, 0,
++                        v -> {
++                            customize(launcher, info, (SuperIconView) icon);
++                            return true;
++                        }));
++            }
+             items.add(new OptionItem(R.string.supericon_size_normal, R.drawable.ic_widget, 0,
+                     v -> {
+-                        apply(launcher, info, WorkspaceItemInfo.SUPER_NONE, 1, 1);
++                        String error = tryApply(launcher, info, WorkspaceItemInfo.SUPER_NONE,
++                                1, 1);
++                        if (error != null) {
++                            Toast.makeText(launcher, error, Toast.LENGTH_SHORT).show();
++                        }
                          return true;
                      }));
++            items.add(new OptionItem(R.string.supericon_backup, R.drawable.ic_widget, 0, v -> {
++                launcher.startActivity(new Intent(launcher, SuperIconBackupActivity.class));
++                return true;
++            }));
          }
-+        if (isSuper && icon instanceof SuperIconView) {
-+            items.add(new OptionItem(R.string.supericon_customize, R.drawable.ic_widget, 0,
-+                    v -> {
-+                        customize(launcher, info, (SuperIconView) icon);
-+                        return true;
-+                    }));
-+        }
-         if (isSuper) {
-             final boolean solid = WorkspaceItemInfo.isSolidStyle(currentStyle);
-             final int otherStyle = solid
-@@ -90,6 +104,40 @@ public final class SuperIconMenu {
-         OptionsPopupView.show(launcher, new RectF(rect), items);
-     }
- 
-+    /** Opens the editor for the supericon's image, label colour, size and position. */
+-        for (int i = 0; i < SIZES.length; i++) {
+-            final int sx = SIZES[i][0];
+-            final int sy = SIZES[i][1];
+-            if (isSuper && info.spanX == sx && info.spanY == sy) {
+-                continue;
++        OptionsPopupView.show(launcher, new RectF(rect), items);
++    }
++
++    /** Opens the editor: size, style, background, image, and the label. */
 +    private static void customize(Launcher launcher, WorkspaceItemInfo info, SuperIconView view) {
 +        Intent i = new Intent(launcher, SuperIconEditActivity.class);
 +        i.putExtra(SuperIconEditActivity.EXTRA_ID, (long) info.id);
@@ -80,9 +165,12 @@ index 242a23e..b0582b1 100644
 +                info.title == null ? "" : info.title.toString());
 +        i.putExtra(SuperIconEditActivity.EXTRA_SOLID,
 +                WorkspaceItemInfo.isSolidStyle(info.superStyle));
-+        i.putExtra(SuperIconEditActivity.EXTRA_CARD, info.spanY > 1);
-+        i.putExtra(SuperIconEditActivity.EXTRA_W, view.getWidth());
-+        i.putExtra(SuperIconEditActivity.EXTRA_H, view.getHeight());
++        i.putExtra(SuperIconEditActivity.EXTRA_SPAN_X, info.spanX);
++        i.putExtra(SuperIconEditActivity.EXTRA_SPAN_Y, info.spanY);
++        i.putExtra(SuperIconEditActivity.EXTRA_CELL_W,
++                view.getWidth() / Math.max(1, info.spanX));
++        i.putExtra(SuperIconEditActivity.EXTRA_CELL_H,
++                view.getHeight() / Math.max(1, info.spanY));
 +        i.putExtra(SuperIconEditActivity.EXTRA_REGULAR, view.getRegularIconSizePx());
 +        i.putExtra(SuperIconEditActivity.EXTRA_TEXT_SIZE, view.getBaseTextSizePx());
 +        i.putExtra(SuperIconEditActivity.EXTRA_TINT,
@@ -97,24 +185,378 @@ index 242a23e..b0582b1 100644
 +                i.putExtra(SuperIconEditActivity.EXTRA_ICON, f.getAbsolutePath());
 +            } catch (IOException e) {
 +                // The preview is simply drawn without the icon
-+            }
-+        }
+             }
+-            items.add(new OptionItem(SIZE_LABELS[i], R.drawable.ic_widget, 0,
+-                    v -> {
+-                        apply(launcher, info, style, sx, sy);
+-                        return true;
+-                    }));
+         }
+-        if (isSuper) {
+-            final boolean solid = WorkspaceItemInfo.isSolidStyle(currentStyle);
+-            final int otherStyle = solid
+-                    ? WorkspaceItemInfo.SUPER_STYLE_SIDE : WorkspaceItemInfo.SUPER_STYLE_SOLID;
+-            items.add(new OptionItem(
+-                    solid ? R.string.supericon_style_glass : R.string.supericon_style_solid,
+-                    R.drawable.ic_widget, 0,
+-                    v -> {
+-                        apply(launcher, info, otherStyle, info.spanX, info.spanY);
+-                        return true;
+-                    }));
 +        try {
 +            launcher.startActivity(i);
 +        } catch (RuntimeException e) {
 +            Toast.makeText(launcher, "Gagal membuka editor: " + e, Toast.LENGTH_LONG).show();
-+        }
+         }
+-        OptionsPopupView.show(launcher, new RectF(rect), items);
 +    }
 +
++    /**
++     * Called by the editor to give a supericon another size or style. Returns an error message,
++     * or null if it worked.
++     */
++    public static String resizeFromEditor(int itemId, int style, int spanX, int spanY) {
++        Launcher launcher = sLauncher.get();
++        if (launcher == null) {
++            return "Layar utama tidak aktif";
++        }
++        View v = launcher.getWorkspace().getHomescreenIconByItemId(itemId);
++        if (v == null || !(v.getTag() instanceof WorkspaceItemInfo)) {
++            return "Ikon tidak ditemukan di layar utama";
++        }
++        return tryApply(launcher, (WorkspaceItemInfo) v.getTag(), style, spanX, spanY);
+     }
+ 
      /**
-      * Finds a free region of the given size that contains the cell (cellX, cellY), preferring
-      * to keep the origin and grow to the right and downwards. The icon's own cells must already
+@@ -112,12 +169,13 @@ public final class SuperIconMenu {
+         return null;
+     }
+ 
+-    private static void apply(Launcher launcher, WorkspaceItemInfo info, int newStyle,
++    /** Applies a style and size to the icon. Returns an error message, or null on success. */
++    private static String tryApply(Launcher launcher, WorkspaceItemInfo info, int newStyle,
+             int newSpanX, int newSpanY) {
+         View old = launcher.getWorkspace().getHomescreenIconByItemId(info.id);
+         if (old == null || !(old.getParent() instanceof ShortcutAndWidgetContainer)
+                 || !(old.getParent().getParent() instanceof CellLayout)) {
+-            return;
++            return "Ikon tidak ditemukan di layar utama";
+         }
+         CellLayout layout = (CellLayout) old.getParent().getParent();
+         CellLayout.LayoutParams lp = (CellLayout.LayoutParams) old.getLayoutParams();
+@@ -129,8 +187,7 @@ public final class SuperIconMenu {
+             int[] spot = findSpot(layout, lp.cellX, lp.cellY, newSpanX, newSpanY);
+             layout.markCellsAsOccupiedForView(old);
+             if (spot == null) {
+-                Toast.makeText(launcher, R.string.supericon_no_space, Toast.LENGTH_SHORT).show();
+-                return;
++                return launcher.getString(R.string.supericon_no_space);
+             }
+             newX = spot[0];
+             newY = spot[1];
+@@ -141,8 +198,13 @@ public final class SuperIconMenu {
+         launcher.getModelWriter().modifyItemInDatabase(info, info.container, info.screenId,
+                 newX, newY, newSpanX, newSpanY);
+         launcher.getModelWriter().updateItemInDatabase(info);
++        if (newStyle == WorkspaceItemInfo.SUPER_NONE) {
++            // Back to a regular icon: its supericon settings and image are no longer needed
++            SuperIconSettings.delete(launcher, info.id);
++        }
+ 
+         View view = launcher.createShortcut(layout, info);
+         launcher.getWorkspace().addInScreen(view, info);
++        return null;
+     }
+ }
+diff --git a/src/com/android/launcher3/supericon/SuperIconBackupActivity.java b/src/com/android/launcher3/supericon/SuperIconBackupActivity.java
+new file mode 100644
+index 0000000..fa81125
+--- /dev/null
++++ b/src/com/android/launcher3/supericon/SuperIconBackupActivity.java
+@@ -0,0 +1,277 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.launcher3.supericon;
++
++import android.app.Activity;
++import android.content.Context;
++import android.content.Intent;
++import android.net.Uri;
++import android.os.Bundle;
++import android.view.View;
++import android.view.ViewGroup;
++import android.widget.Button;
++import android.widget.LinearLayout;
++import android.widget.TextView;
++import android.widget.Toast;
++
++import org.json.JSONArray;
++import org.json.JSONException;
++import org.json.JSONObject;
++
++import java.io.ByteArrayOutputStream;
++import java.io.File;
++import java.io.FileOutputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.OutputStream;
++import java.nio.charset.StandardCharsets;
++import java.util.HashMap;
++import java.util.HashSet;
++import java.util.Map;
++import java.util.Set;
++import java.util.zip.ZipEntry;
++import java.util.zip.ZipInputStream;
++import java.util.zip.ZipOutputStream;
++
++/**
++ * Backup of the supericon settings and background images: export to a zip file, import from one,
++ * and removal of data that no supericon uses any more.
++ *
++ * Settings are matched by the app's component name, not by the item id, so a backup can be
++ * restored after the supericons have been recreated. Only supericons that are on the workspace
++ * (loaded since the launcher started) are exported, restored into, or kept by the cleanup.
++ */
++public class SuperIconBackupActivity extends Activity {
++
++    private static final int REQ_EXPORT = 1;
++    private static final int REQ_IMPORT = 2;
++    private static final String SETTINGS_ENTRY = "settings.json";
++
++    private TextView mStatus;
++
++    @Override
++    protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        float d = getResources().getDisplayMetrics().density;
++        LinearLayout root = new LinearLayout(this);
++        root.setOrientation(LinearLayout.VERTICAL);
++        int pad = (int) (16 * d);
++        root.setPadding(pad, pad, pad, pad);
++
++        TextView title = new TextView(this);
++        title.setText("Cadangan supericon");
++        title.setTextSize(20);
++        root.addView(title);
++
++        TextView info = new TextView(this);
++        info.setText("Ekspor menyimpan pengaturan dan gambar latar semua supericon yang ada di "
++                + "layar utama ke satu file zip. Impor memulihkannya ke supericon dengan "
++                + "aplikasi yang sama. Bersihkan menghapus data supericon yang sudah tidak "
++                + "dipakai.");
++        info.setPadding(0, pad / 2, 0, pad / 2);
++        root.addView(info);
++
++        root.addView(button("Ekspor ke file", v -> {
++            Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
++            i.setType("application/zip");
++            i.addCategory(Intent.CATEGORY_OPENABLE);
++            i.putExtra(Intent.EXTRA_TITLE, "supericon-backup.zip");
++            startActivityForResult(i, REQ_EXPORT);
++        }));
++        root.addView(button("Impor dari file", v -> {
++            Intent i = new Intent(Intent.ACTION_GET_CONTENT);
++            i.setType("*/*");
++            i.addCategory(Intent.CATEGORY_OPENABLE);
++            startActivityForResult(i, REQ_IMPORT);
++        }));
++        root.addView(button("Bersihkan data tak terpakai", v -> cleanup()));
++
++        mStatus = new TextView(this);
++        mStatus.setPadding(0, pad, 0, 0);
++        root.addView(mStatus);
++        setContentView(root);
++    }
++
++    private Button button(String text, View.OnClickListener l) {
++        Button b = new Button(this);
++        b.setText(text);
++        b.setAllCaps(false);
++        b.setOnClickListener(l);
++        b.setLayoutParams(new LinearLayout.LayoutParams(
++                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
++        return b;
++    }
++
++    private void say(String text) {
++        mStatus.setText(text);
++        Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
++    }
++
++    private void cleanup() {
++        Map<Long, String> active = SuperIconSettings.activeItems();
++        if (active.isEmpty()) {
++            say("Tidak ada supericon yang termuat. Buka layar utama dulu.");
++            return;
++        }
++        int n = SuperIconSettings.deleteExcept(this, new HashSet<>(active.keySet()));
++        say(n + " data supericon yang tidak dipakai dihapus.");
++    }
++
++    @Override
++    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
++        super.onActivityResult(requestCode, resultCode, data);
++        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
++            return;
++        }
++        final Context ctx = getApplicationContext();
++        final Uri uri = data.getData();
++        final boolean export = requestCode == REQ_EXPORT;
++        if (!export && requestCode != REQ_IMPORT) {
++            return;
++        }
++        new Thread(() -> {
++            String result;
++            try {
++                if (export) {
++                    try (OutputStream out = ctx.getContentResolver().openOutputStream(uri)) {
++                        int n = exportAll(ctx, out);
++                        result = n == 0 ? "Tidak ada supericon dengan pengaturan untuk diekspor."
++                                : n + " supericon diekspor.";
++                    }
++                } else {
++                    try (InputStream in = ctx.getContentResolver().openInputStream(uri)) {
++                        int[] r = importAll(ctx, in);
++                        result = r[0] + " supericon dipulihkan, " + r[1]
++                                + " dilewati (belum ada supericon untuk aplikasinya).";
++                    }
++                }
++            } catch (IOException | JSONException | RuntimeException e) {
++                result = "Gagal: " + e;
++            }
++            final String text = result;
++            runOnUiThread(() -> say(text));
++        }).start();
++    }
++
++    // ------------------------------------------------------------------ zip
++
++    /** Writes the settings and images of all loaded supericons. Returns how many were written. */
++    static int exportAll(Context ctx, OutputStream out) throws IOException, JSONException {
++        JSONArray items = new JSONArray();
++        ZipOutputStream zip = new ZipOutputStream(out);
++        int n = 0;
++        for (Map.Entry<Long, String> e : SuperIconSettings.activeItems().entrySet()) {
++            long id = e.getKey();
++            if (!SuperIconSettings.hasStored(ctx, id)) {
++                continue;
++            }
++            JSONObject o = new JSONObject();
++            o.put("component", e.getValue());
++            o.put("settings", SuperIconSettings.load(ctx, id).toJson());
++            File img = SuperIconSettings.imageFile(ctx, id);
++            if (img.exists()) {
++                String name = "images/" + n + ".png";
++                zip.putNextEntry(new ZipEntry(name));
++                byte[] bytes;
++                try (java.io.FileInputStream fi = new java.io.FileInputStream(img)) {
++                    bytes = readAll(fi);
++                }
++                zip.write(bytes);
++                zip.closeEntry();
++                o.put("image", name);
++            }
++            items.put(o);
++            n++;
++        }
++        JSONObject root = new JSONObject();
++        root.put("version", 1);
++        root.put("items", items);
++        zip.putNextEntry(new ZipEntry(SETTINGS_ENTRY));
++        zip.write(root.toString().getBytes(StandardCharsets.UTF_8));
++        zip.closeEntry();
++        zip.finish();
++        zip.flush();
++        return n;
++    }
++
++    /** Restores a backup into the loaded supericons. Returns {restored, skipped}. */
++    static int[] importAll(Context ctx, InputStream in) throws IOException, JSONException {
++        Map<String, byte[]> entries = new HashMap<>();
++        try (ZipInputStream zip = new ZipInputStream(in)) {
++            ZipEntry e;
++            while ((e = zip.getNextEntry()) != null) {
++                entries.put(e.getName(), readAll(zip));
++            }
++        }
++        byte[] settings = entries.get(SETTINGS_ENTRY);
++        if (settings == null) {
++            throw new IOException("Bukan file cadangan supericon");
++        }
++        JSONArray items = new JSONObject(new String(settings, StandardCharsets.UTF_8))
++                .getJSONArray("items");
++        Map<Long, String> active = SuperIconSettings.activeItems();
++        Set<Long> touched = new HashSet<>();
++        int restored = 0;
++        int skipped = 0;
++        for (int i = 0; i < items.length(); i++) {
++            JSONObject o = items.getJSONObject(i);
++            String component = o.optString("component");
++            SuperIconSettings s = SuperIconSettings.fromJson(o.getJSONObject("settings"));
++            String imageName = o.optString("image", "");
++            byte[] image = imageName.isEmpty() ? null : entries.get(imageName);
++            boolean any = false;
++            for (Map.Entry<Long, String> a : active.entrySet()) {
++                if (!a.getValue().equals(component) || touched.contains(a.getKey())) {
++                    continue;
++                }
++                long id = a.getKey();
++                touched.add(id);
++                s.save(ctx, id);
++                File f = SuperIconSettings.imageFile(ctx, id);
++                if (image != null) {
++                    try (FileOutputStream fo = new FileOutputStream(f)) {
++                        fo.write(image);
++                    }
++                } else {
++                    f.delete();
++                }
++                any = true;
++                restored++;
++                break;
++            }
++            if (!any) {
++                skipped++;
++            }
++        }
++        final Set<Long> ids = touched;
++        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
++            for (long id : ids) {
++                SuperIconSettings.notifyChanged(id);
++            }
++        });
++        return new int[] {restored, skipped};
++    }
++
++    private static byte[] readAll(InputStream in) throws IOException {
++        ByteArrayOutputStream bos = new ByteArrayOutputStream();
++        byte[] buf = new byte[8192];
++        int n;
++        while ((n = in.read(buf)) > 0) {
++            bos.write(buf, 0, n);
++        }
++        return bos.toByteArray();
++    }
++}
 diff --git a/src/com/android/launcher3/supericon/SuperIconEditActivity.java b/src/com/android/launcher3/supericon/SuperIconEditActivity.java
 new file mode 100644
-index 0000000..03c06db
+index 0000000..728d79c
 --- /dev/null
 +++ b/src/com/android/launcher3/supericon/SuperIconEditActivity.java
-@@ -0,0 +1,487 @@
+@@ -0,0 +1,705 @@
 +/*
 + * Copyright (C) 2026 The Android Open Source Project
 + *
@@ -140,37 +582,51 @@ index 0000000..03c06db
 +import android.graphics.Canvas;
 +import android.graphics.Color;
 +import android.graphics.Paint;
++import android.graphics.RectF;
 +import android.graphics.drawable.GradientDrawable;
++import android.net.Uri;
 +import android.os.Bundle;
++import android.text.Editable;
++import android.text.InputType;
 +import android.text.Layout;
 +import android.text.StaticLayout;
 +import android.text.TextPaint;
++import android.text.TextWatcher;
 +import android.view.Gravity;
 +import android.view.View;
 +import android.view.ViewGroup;
 +import android.widget.Button;
 +import android.widget.CheckBox;
++import android.widget.EditText;
++import android.widget.HorizontalScrollView;
 +import android.widget.LinearLayout;
++import android.widget.RadioButton;
++import android.widget.RadioGroup;
 +import android.widget.ScrollView;
 +import android.widget.SeekBar;
 +import android.widget.TextView;
 +import android.widget.Toast;
 +
++import com.android.launcher3.WorkspaceItemInfo;
++import com.android.launcher3.popup.SuperIconMenu;
++
 +import java.io.File;
 +
 +/**
-+ * Editor for one supericon: background image (import, zoom, pan, dimming), label colour, size
-+ * and position, and icon visibility. Opened from the supericon menu with the item's id and the
-+ * size of its view; the preview uses the same geometry as the workspace view.
++ * Editor for one supericon: size and style, background (colour from the style, adaptive to the
++ * icon, or a hex colour), background image (import, zoom in or out, pan, dimming), the label's
++ * colour, size and position, and whether the icon, label and app shortcuts are shown. The
++ * preview uses the same geometry as the workspace view.
 + */
 +public class SuperIconEditActivity extends Activity {
 +
 +    public static final String EXTRA_ID = "id";
 +    public static final String EXTRA_LABEL = "label";
 +    public static final String EXTRA_SOLID = "solid";
-+    public static final String EXTRA_CARD = "card";
-+    public static final String EXTRA_W = "w";
-+    public static final String EXTRA_H = "h";
++    public static final String EXTRA_SPAN_X = "spanX";
++    public static final String EXTRA_SPAN_Y = "spanY";
++    public static final String EXTRA_CELL_W = "cellW";
++    public static final String EXTRA_CELL_H = "cellH";
 +    public static final String EXTRA_REGULAR = "regular";
 +    public static final String EXTRA_TEXT_SIZE = "textSize";
 +    public static final String EXTRA_TINT = "tint";
@@ -181,6 +637,8 @@ index 0000000..03c06db
 +    private static final int REQ_PICK = 1;
 +    private static final int[] SWATCHES = {
 +            0, Color.WHITE, Color.BLACK, 0xFFFFD60A, 0xFFFF6B9D, 0xFF64D2FF, 0xFF30D158};
++    private static final int[][] SIZES = {{2, 1}, {3, 1}, {4, 1}, {2, 2}, {1, 2}};
++    private static final String[] SIZE_NAMES = {"2×1", "3×1", "4×1", "2×2", "1×2"};
 +
 +    private interface OnValue {
 +        void on(int value);
@@ -190,9 +648,16 @@ index 0000000..03c06db
 +    private SuperIconSettings mSettings;
 +    private File mPending;
 +    private boolean mRemoveImage;
++    private boolean mSolidStyle;
++    private int mOrigSx;
++    private int mOrigSy;
++    private boolean mOrigSolid;
++    private boolean mSyncing;
 +    private Preview mPreview;
 +    private SeekBar mZoom, mPanX, mPanY, mDim, mLabelSize;
-+    private CheckBox mShowIcon;
++    private CheckBox mShowIcon, mShowLabel, mShowChips;
++    private RadioGroup mSizeGroup, mStyleGroup, mBgGroup;
++    private EditText mHex;
 +    private final View[] mSwatchViews = new View[SWATCHES.length];
 +    private final Button[] mGrid = new Button[9];
 +    private float mD;
@@ -208,12 +673,16 @@ index 0000000..03c06db
 +        }
 +        mD = getResources().getDisplayMetrics().density;
 +        mSettings = SuperIconSettings.load(this, mId);
++        mSolidStyle = in.getBooleanExtra(EXTRA_SOLID, true);
++        mOrigSolid = mSolidStyle;
 +
 +        mPreview = new Preview(this);
-+        mPreview.solid = in.getBooleanExtra(EXTRA_SOLID, true);
-+        mPreview.card = in.getBooleanExtra(EXTRA_CARD, false);
-+        mPreview.vw = Math.max(1, in.getIntExtra(EXTRA_W, 1));
-+        mPreview.vh = Math.max(1, in.getIntExtra(EXTRA_H, 1));
++        mPreview.sx = Math.max(1, in.getIntExtra(EXTRA_SPAN_X, 2));
++        mPreview.sy = Math.max(1, in.getIntExtra(EXTRA_SPAN_Y, 1));
++        mOrigSx = mPreview.sx;
++        mOrigSy = mPreview.sy;
++        mPreview.cellW = Math.max(1, in.getIntExtra(EXTRA_CELL_W, 1));
++        mPreview.cellH = Math.max(1, in.getIntExtra(EXTRA_CELL_H, 1));
 +        mPreview.regular = in.getIntExtra(EXTRA_REGULAR, (int) (56 * mD));
 +        mPreview.baseText = in.getFloatExtra(EXTRA_TEXT_SIZE, 12 * mD);
 +        mPreview.tint = in.getIntExtra(EXTRA_TINT, 0xFF5F5E5A);
@@ -225,6 +694,7 @@ index 0000000..03c06db
 +        if (iconPath != null) {
 +            mPreview.icon = BitmapFactory.decodeFile(iconPath);
 +        }
++        mPreview.solidStyle = mSolidStyle;
 +        mPreview.settings = mSettings;
 +        mPreview.image = SuperIconSettings.loadImage(this, mId);
 +
@@ -244,6 +714,70 @@ index 0000000..03c06db
 +        pl.bottomMargin = pad / 2;
 +        root.addView(mPreview, pl);
 +
++        // ---- size and style
++        root.addView(section("Ukuran dan gaya"));
++        mSizeGroup = radios(SIZE_NAMES, true, i -> {
++            mPreview.sx = SIZES[i][0];
++            mPreview.sy = SIZES[i][1];
++            refreshGrid();
++            mPreview.requestLayout();
++            mPreview.invalidate();
++        });
++        HorizontalScrollView sizeScroll = new HorizontalScrollView(this);
++        sizeScroll.addView(mSizeGroup);
++        root.addView(sizeScroll);
++        mStyleGroup = radios(new String[] {"Kaca", "Warna"}, true, i -> {
++            mSolidStyle = i == 1;
++            mPreview.solidStyle = mSolidStyle;
++            mPreview.invalidate();
++        });
++        root.addView(mStyleGroup);
++
++        // ---- background colour
++        root.addView(section("Warna latar"));
++        mBgGroup = radios(new String[] {"Sesuai gaya", "Adaptif (warna ikon aplikasi)",
++                "Warna kustom (hex)"}, false, i -> {
++            mSettings.bgMode = i;
++            mHex.setEnabled(i == SuperIconSettings.BG_CUSTOM);
++            mPreview.invalidate();
++        });
++        root.addView(mBgGroup);
++        mHex = new EditText(this);
++        mHex.setHint("#RRGGBB atau #AARRGGBB");
++        mHex.setSingleLine(true);
++        mHex.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
++        mHex.addTextChangedListener(new TextWatcher() {
++            @Override
++            public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
++
++            @Override
++            public void onTextChanged(CharSequence s, int a, int b, int c) { }
++
++            @Override
++            public void afterTextChanged(Editable e) {
++                if (mSyncing) {
++                    return;
++                }
++                String t = e.toString().trim();
++                if (t.isEmpty()) {
++                    return;
++                }
++                if (!t.startsWith("#")) {
++                    t = "#" + t;
++                }
++                try {
++                    mSettings.bgColor = Color.parseColor(t);
++                    mHex.setError(null);
++                    mPreview.invalidate();
++                } catch (IllegalArgumentException ex) {
++                    mHex.setError("Format hex tidak valid");
++                }
++            }
++        });
++        root.addView(mHex);
++
++        // ---- background image
++        root.addView(section("Gambar latar"));
 +        LinearLayout imgButtons = row();
 +        imgButtons.addView(button("Pilih gambar", v -> pickImage()), weight());
 +        imgButtons.addView(button("Hapus gambar", v -> {
@@ -256,25 +790,24 @@ index 0000000..03c06db
 +            mPreview.invalidate();
 +        }), weight());
 +        root.addView(imgButtons);
-+
-+        root.addView(section("Gambar latar"));
-+        mZoom = seek(root, "Perbesar", 0, 200, 0, v -> {
-+            mSettings.imageZoom = 1f + v / 100f;
++        mZoom = seek(root, "Perbesar / perkecil (%)", 30, 300, v -> {
++            mSettings.imageZoom = v / 100f;
 +            mPreview.invalidate();
 +        });
-+        mPanX = seek(root, "Geser mendatar", 0, 200, 0, v -> {
++        mPanX = seek(root, "Geser mendatar", 0, 200, v -> {
 +            mSettings.imageX = (v - 100) / 100f;
 +            mPreview.invalidate();
 +        });
-+        mPanY = seek(root, "Geser tegak", 0, 200, 0, v -> {
++        mPanY = seek(root, "Geser tegak", 0, 200, v -> {
 +            mSettings.imageY = (v - 100) / 100f;
 +            mPreview.invalidate();
 +        });
-+        mDim = seek(root, "Gelapkan gambar", 0, 80, 0, v -> {
++        mDim = seek(root, "Gelapkan gambar", 0, 80, v -> {
 +            mSettings.imageDim = v;
 +            mPreview.invalidate();
 +        });
 +
++        // ---- label
 +        root.addView(section("Label"));
 +        LinearLayout swatches = row();
 +        for (int i = 0; i < SWATCHES.length; i++) {
@@ -295,7 +828,7 @@ index 0000000..03c06db
 +            swatches.addView(sw, lp);
 +        }
 +        root.addView(swatches);
-+        mLabelSize = seek(root, "Ukuran label (%)", 50, 160, 100, v -> {
++        mLabelSize = seek(root, "Ukuran label (%)", 50, 160, v -> {
 +            mSettings.labelScale = v / 100f;
 +            mPreview.invalidate();
 +        });
@@ -330,13 +863,13 @@ index 0000000..03c06db
 +            mPreview.invalidate();
 +        }));
 +
-+        mShowIcon = new CheckBox(this);
-+        mShowIcon.setText("Tampilkan ikon");
-+        mShowIcon.setOnCheckedChangeListener((b, checked) -> {
-+            mSettings.showIcon = checked;
-+            mPreview.invalidate();
++        // ---- what is shown
++        mShowIcon = check(root, "Tampilkan ikon", c -> mSettings.showIcon = c);
++        mShowLabel = check(root, "Tampilkan label", c -> mSettings.showLabel = c);
++        mShowChips = check(root, "Tampilkan pintasan aplikasi (3×1, 4×1, 2×2)", c -> {
++            mSettings.showChips = c;
++            refreshGrid();
 +        });
-+        root.addView(mShowIcon);
 +
 +        LinearLayout actions = row();
 +        actions.addView(button("Atur ulang", v -> resetAll()), weight());
@@ -354,6 +887,10 @@ index 0000000..03c06db
 +    }
 +
 +    // ------------------------------------------------------------ UI helpers
++
++    private interface OnBool {
++        void on(boolean value);
++    }
 +
 +    private LinearLayout row() {
 +        LinearLayout l = new LinearLayout(this);
@@ -381,8 +918,46 @@ index 0000000..03c06db
 +        return t;
 +    }
 +
-+    private SeekBar seek(LinearLayout parent, String label, int min, int max, int unused,
-+            OnValue cb) {
++    private CheckBox check(LinearLayout parent, String text, OnBool cb) {
++        CheckBox c = new CheckBox(this);
++        c.setText(text);
++        c.setOnCheckedChangeListener((b, checked) -> {
++            if (!mSyncing) {
++                cb.on(checked);
++                mPreview.invalidate();
++            }
++        });
++        parent.addView(c);
++        return c;
++    }
++
++    private RadioGroup radios(String[] labels, boolean horizontal, OnValue cb) {
++        RadioGroup g = new RadioGroup(this);
++        g.setOrientation(horizontal ? RadioGroup.HORIZONTAL : RadioGroup.VERTICAL);
++        for (String label : labels) {
++            RadioButton b = new RadioButton(this);
++            b.setText(label);
++            b.setId(View.generateViewId());
++            g.addView(b);
++        }
++        g.setOnCheckedChangeListener((group, id) -> {
++            if (mSyncing) {
++                return;
++            }
++            for (int i = 0; i < group.getChildCount(); i++) {
++                if (group.getChildAt(i).getId() == id) {
++                    cb.on(i);
++                }
++            }
++        });
++        return g;
++    }
++
++    private static void checkIndex(RadioGroup g, int index) {
++        g.check(g.getChildAt(index).getId());
++    }
++
++    private SeekBar seek(LinearLayout parent, String label, int min, int max, OnValue cb) {
 +        TextView t = new TextView(this);
 +        t.setText(label);
 +        parent.addView(t);
@@ -411,18 +986,42 @@ index 0000000..03c06db
 +        bar.setProgress(value - (Integer) bar.getTag());
 +    }
 +
++    private static int sizeIndex(int sx, int sy) {
++        for (int i = 0; i < SIZES.length; i++) {
++            if (SIZES[i][0] == sx && SIZES[i][1] == sy) {
++                return i;
++            }
++        }
++        return 0;
++    }
++
 +    /** Pushes the current settings into the controls. */
 +    private void syncControls() {
-+        setSeek(mZoom, Math.round((mSettings.imageZoom - 1f) * 100));
++        mSyncing = true;
++        checkIndex(mSizeGroup, sizeIndex(mPreview.sx, mPreview.sy));
++        checkIndex(mStyleGroup, mSolidStyle ? 1 : 0);
++        checkIndex(mBgGroup, mSettings.bgMode);
++        mHex.setEnabled(mSettings.bgMode == SuperIconSettings.BG_CUSTOM);
++        mHex.setText(hex(mSettings.bgColor));
++        setSeek(mZoom, Math.round(mSettings.imageZoom * 100));
 +        setSeek(mPanX, Math.round(mSettings.imageX * 100) + 100);
 +        setSeek(mPanY, Math.round(mSettings.imageY * 100) + 100);
 +        setSeek(mDim, mSettings.imageDim);
 +        setSeek(mLabelSize, Math.round(mSettings.labelScale * 100));
 +        mShowIcon.setChecked(mSettings.showIcon);
++        mShowLabel.setChecked(mSettings.showLabel);
++        mShowChips.setChecked(mSettings.showChips);
++        mSyncing = false;
 +        refreshSwatches();
 +        refreshGrid();
 +        mPreview.settings = mSettings;
++        mPreview.requestLayout();
 +        mPreview.invalidate();
++    }
++
++    private static String hex(int color) {
++        return (color >>> 24) == 0xFF
++                ? String.format("#%06X", color & 0xFFFFFF) : String.format("#%08X", color);
 +    }
 +
 +    private void refreshSwatches() {
@@ -437,8 +1036,8 @@ index 0000000..03c06db
 +    }
 +
 +    private void refreshGrid() {
-+        int h = mSettings.effectiveH();
-+        int v = mSettings.effectiveV(mPreview.card);
++        int h = mSettings.effectiveH(mPreview.sx, mPreview.sy);
++        int v = mSettings.effectiveV(mPreview.sx, mPreview.sy, mPreview.chipCount());
 +        for (int r = 0; r < 3; r++) {
 +            for (int c = 0; c < 3; c++) {
 +                mGrid[r * 3 + c].setText(r == v && c == h ? "●" : "○");
@@ -469,7 +1068,7 @@ index 0000000..03c06db
 +        }
 +        final Context ctx = getApplicationContext();
 +        final File dest = SuperIconSettings.tempImageFile(ctx, mId);
-+        final android.net.Uri uri = data.getData();
++        final Uri uri = data.getData();
 +        new Thread(() -> {
 +            final boolean ok = SuperIconSettings.importImage(ctx, uri, dest);
 +            runOnUiThread(() -> {
@@ -509,14 +1108,34 @@ index 0000000..03c06db
 +        File fin = SuperIconSettings.imageFile(this, mId);
 +        if (mRemoveImage) {
 +            fin.delete();
++            mRemoveImage = false;
 +        }
 +        if (mPending != null && mPending.exists()) {
 +            fin.delete();
 +            if (!mPending.renameTo(fin)) {
 +                Toast.makeText(this, "Gambar gagal disimpan", Toast.LENGTH_SHORT).show();
 +            }
++            mPending = null;
 +        }
 +        mSettings.save(this, mId);
++
++        boolean resized = mPreview.sx != mOrigSx || mPreview.sy != mOrigSy
++                || mSolidStyle != mOrigSolid;
++        if (resized) {
++            String error = SuperIconMenu.resizeFromEditor((int) mId,
++                    mSolidStyle ? WorkspaceItemInfo.SUPER_STYLE_SOLID
++                            : WorkspaceItemInfo.SUPER_STYLE_SIDE,
++                    mPreview.sx, mPreview.sy);
++            if (error != null) {
++                // Stay open so another size can be chosen; the other settings are saved
++                Toast.makeText(this, error, Toast.LENGTH_LONG).show();
++                SuperIconSettings.notifyChanged(mId);
++                return;
++            }
++            mOrigSx = mPreview.sx;
++            mOrigSy = mPreview.sy;
++            mOrigSolid = mSolidStyle;
++        }
 +        SuperIconSettings.notifyChanged(mId);
 +        finish();
 +    }
@@ -538,17 +1157,19 @@ index 0000000..03c06db
 +        final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
 +        final Paint backPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 +        final TextPaint text = new TextPaint(Paint.ANTI_ALIAS_FLAG);
++        final RectF tmp = new RectF();
 +        final float d;
 +        SuperIconSettings settings;
 +        Bitmap image;
 +        Bitmap icon;
 +        String label = "";
-+        boolean solid;
-+        boolean card;
++        boolean solidStyle;
++        int sx = 2;
++        int sy = 1;
++        int cellW = 1;
++        int cellH = 1;
 +        int tint;
 +        int defColor;
-+        int vw = 1;
-+        int vh = 1;
 +        int regular;
 +        float baseText;
 +        float ratio = 0.5f;
@@ -561,53 +1182,92 @@ index 0000000..03c06db
 +            backPaint.setColor(0xFF6B6F76);
 +        }
 +
++        int chipCount() {
++            return settings != null && settings.showChips
++                    ? SuperIconLayout.maxChips(sx, sy) : 0;
++        }
++
 +        @Override
 +        protected void onMeasure(int wSpec, int hSpec) {
 +            int w = MeasureSpec.getSize(wSpec);
-+            setMeasuredDimension(w, Math.round(w * vh / (float) vw));
++            // A one-column tile is narrow: show it at no more than the width of its own size
++            // relative to a 2-wide pill so it does not fill the screen.
++            int vw = cellW * sx;
++            int vh = cellH * sy;
++            float k = Math.min(w / (float) vw, (w * 0.5f) / (float) cellW);
++            setMeasuredDimension(w, Math.round(vh * k) + 1);
 +        }
 +
 +        @Override
 +        protected void onDraw(Canvas canvas) {
-+            float k = getWidth() / (float) vw;
++            int vw = cellW * sx;
++            int vh = cellH * sy;
++            float k = Math.min(getWidth() / (float) vw, (getWidth() * 0.5f) / (float) cellW);
 +            canvas.drawRoundRect(0, 0, getWidth(), getHeight(), 16 * d, 16 * d, backPaint);
 +            canvas.save();
++            canvas.translate((getWidth() - vw * k) / 2f, 0);
 +            canvas.scale(k, k);
-+            lay.compute(vw, vh, card, solid, settings.showIcon, regular, d * 1f, ratio);
-+            lay.drawBackground(canvas, solid, tint, image, settings, fill, stroke, d);
++            int chips = chipCount();
++            int fillColor = settings.fillColor(solidStyle, tint);
++            lay.compute(vw, vh, sx, sy, fillColor != 0, settings.showIcon, regular, d, ratio,
++                    chips);
++            lay.drawBackground(canvas, fillColor, image, settings, fill, stroke, d);
 +            if (settings.showIcon && icon != null) {
 +                canvas.drawBitmap(icon, null, lay.icon, null);
 +            }
++            int labelColor = settings.resolveLabelColor(fillColor, image != null, defColor);
 +
-+            text.setTextSize(baseText * settings.labelScale);
-+            text.setColor(settings.resolveLabelColor(solid, tint, image != null, defColor));
-+            int boxW = Math.max(1, vw - lay.padStart - lay.padEnd);
-+            int h = settings.effectiveH();
-+            int v = settings.effectiveV(card);
-+            Layout.Alignment align = h == 0 ? Layout.Alignment.ALIGN_NORMAL
-+                    : (h == 1 ? Layout.Alignment.ALIGN_CENTER : Layout.Alignment.ALIGN_OPPOSITE);
-+            String shown = label;
-+            StaticLayout sl = new StaticLayout(shown, text, boxW, align, 1f, 0f, false);
-+            if (sl.getLineCount() > 2) {
-+                int end = Math.max(1, sl.getLineEnd(1) - 1);
-+                shown = label.substring(0, Math.min(end, label.length())).trim() + "…";
-+                sl = new StaticLayout(shown, text, boxW, align, 1f, 0f, false);
++            // Placeholders where the app's shortcuts go
++            for (int i = 0; i < lay.chipCountFit; i++) {
++                RectF r = lay.chips[i];
++                if (lay.chipRows) {
++                    fill.setColor(Color.argb(60, 255, 255, 255));
++                    canvas.drawRoundRect(r, r.height() / 2f, r.height() / 2f, fill);
++                    text.setTextSize(baseText * 0.9f);
++                    text.setColor(labelColor);
++                    Paint.FontMetrics fm = text.getFontMetrics();
++                    canvas.drawText("Pintasan " + (i + 1), r.left + 12 * d,
++                            r.centerY() - (fm.ascent + fm.descent) / 2f, text);
++                } else {
++                    fill.setColor(Color.argb(235, 255, 255, 255));
++                    canvas.drawCircle(r.centerX(), r.centerY(), r.width() / 2f, fill);
++                    fill.setColor(0xFF9AA0A6);
++                    canvas.drawCircle(r.centerX(), r.centerY(), r.width() / 5f, fill);
++                }
 +            }
-+            float boxH = vh - lay.padTop - lay.padBottom;
-+            float y = lay.padTop + (v == 0 ? 0 : (v == 1 ? (boxH - sl.getHeight()) / 2f
-+                    : boxH - sl.getHeight()));
-+            canvas.translate(lay.padStart, y);
-+            sl.draw(canvas);
++
++            if (settings.showLabel) {
++                text.setTextSize(baseText * settings.labelScale);
++                text.setColor(labelColor);
++                int boxW = Math.max(1, vw - lay.padStart - lay.padEnd);
++                int h = settings.effectiveH(sx, sy);
++                int v = settings.effectiveV(sx, sy, chips);
++                Layout.Alignment align = h == 0 ? Layout.Alignment.ALIGN_NORMAL
++                        : (h == 1 ? Layout.Alignment.ALIGN_CENTER
++                        : Layout.Alignment.ALIGN_OPPOSITE);
++                String shown = label;
++                StaticLayout sl = new StaticLayout(shown, text, boxW, align, 1f, 0f, false);
++                if (sl.getLineCount() > 2) {
++                    int end = Math.max(1, sl.getLineEnd(1) - 1);
++                    shown = label.substring(0, Math.min(end, label.length())).trim() + "…";
++                    sl = new StaticLayout(shown, text, boxW, align, 1f, 0f, false);
++                }
++                float boxH = vh - lay.padTop - lay.padBottom;
++                float y = lay.padTop + (v == 0 ? 0 : (v == 1 ? (boxH - sl.getHeight()) / 2f
++                        : boxH - sl.getHeight()));
++                canvas.translate(lay.padStart, y);
++                sl.draw(canvas);
++            }
 +            canvas.restore();
 +        }
 +    }
 +}
 diff --git a/src/com/android/launcher3/supericon/SuperIconLayout.java b/src/com/android/launcher3/supericon/SuperIconLayout.java
 new file mode 100644
-index 0000000..1cededd
+index 0000000..e41982b
 --- /dev/null
 +++ b/src/com/android/launcher3/supericon/SuperIconLayout.java
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,178 @@
 +/*
 + * Copyright (C) 2026 The Android Open Source Project
 + *
@@ -634,12 +1294,24 @@ index 0000000..1cededd
 +
 +/**
 + * Geometry of a supericon, shared by the workspace view and the editor preview so that the two
-+ * match: the pill, the icon, and the box the label is laid out in.
++ * match: the pill, the icon, the box the label is laid out in, and the app-shortcut chips.
++ *
++ * Shapes: a one-row pill (2x1, 3x1, 4x1) with the icon on the left and, from 3x1, round shortcut
++ * chips on the right; a card (2x2) with the icon top-left and either the label below it or, when
++ * there are shortcuts, the label beside the icon and the shortcuts as rows underneath; and a
++ * tall tile (1x2) with the icon on top and the label below.
 + */
 +public final class SuperIconLayout {
 +
++    public static final int MAX_CHIPS = 3;
++
 +    public final RectF pill = new RectF();
 +    public final Rect icon = new Rect();
++    public final RectF[] chips = {new RectF(), new RectF(), new RectF()};
++    /** How many of the chips fit (and are laid out). */
++    public int chipCountFit;
++    /** True if the chips are rows (card) rather than round buttons. */
++    public boolean chipRows;
 +    public float radius;
 +    public int iconSize;
 +    /** Padding that defines the label's box, in view coordinates. */
@@ -648,55 +1320,122 @@ index 0000000..1cededd
 +    public int padEnd;
 +    public int padBottom;
 +
++    /** The most shortcut chips a size can show. */
++    public static int maxChips(int spanX, int spanY) {
++        if (spanY == 1) {
++            return spanX >= 4 ? 3 : (spanX == 3 ? 2 : 0);
++        }
++        return spanX == 2 && spanY == 2 ? 3 : 0;
++    }
++
++    public static int iconSizeFor(int spanX, int spanY, int regularIcon) {
++        if (spanX == 1 && spanY == 2) {
++            return Math.round(regularIcon * 0.85f);
++        }
++        return spanY == 2 ? regularIcon : Math.round(regularIcon * 0.78f);
++    }
++
 +    /**
-+     * @param card true for the 2x2 size (icon top-left, label below), false for one-row pills
++     * @param solid whether the pill has a solid fill (the icon then sits in a white ring)
 +     * @param regularIcon size of a regular workspace icon, in px
 +     * @param d display density
 +     * @param cornerRatio 0..0.5 corner radius as a fraction of the one-row pill height
++     * @param chipCount how many shortcut chips there are to show (0 for none)
 +     */
-+    public void compute(int w, int h, boolean card, boolean solid, boolean showIcon,
-+            int regularIcon, float d, float cornerRatio) {
++    public void compute(int w, int h, int spanX, int spanY, boolean solid, boolean showIcon,
++            int regularIcon, float d, float cornerRatio, int chipCount) {
++        final boolean tall = spanX == 1 && spanY == 2;
++        final boolean card = spanX >= 2 && spanY == 2;
 +        float side = 3 * d;
-+        int rows = card ? 2 : 1;
-+        float rowH = h / (float) rows;
++        float rowH = h / (float) spanY;
 +        float base = Math.min(rowH, regularIcon + 14 * d);
 +        float vIn = (rowH - base) / 2f;
 +        pill.set(side, vIn, w - side, h - vIn);
 +        radius = Math.min(cornerRatio * base, Math.min(pill.width(), pill.height()) / 2f);
++        iconSize = iconSizeFor(spanX, spanY, regularIcon);
++        chipCountFit = 0;
++        chipRows = false;
 +
-+        iconSize = card ? regularIcon : Math.round(regularIcon * 0.78f);
-+        float inset = (card ? 14 : (solid ? 12 : 9)) * d;
-+        int left = (int) (pill.left + inset);
-+        int top = card ? (int) (pill.top + inset)
-+                : (int) (pill.top + (pill.height() - iconSize) / 2f);
-+        icon.set(left, top, left + iconSize, top + iconSize);
++        if (tall) {
++            int left = (w - iconSize) / 2;
++            int top = (int) (pill.top + 12 * d);
++            icon.set(left, top, left + iconSize, top + iconSize);
++            padStart = (int) (side + 6 * d);
++            padEnd = (int) (side + 6 * d);
++            padTop = (int) (icon.bottom + (solid ? 8 : 4) * d);
++            padBottom = (int) (h - pill.bottom + 10 * d);
++            return;
++        }
 +
-+        padEnd = (int) (11 * d);
 +        if (card) {
-+            padStart = (int) (pill.left + inset);
-+            padTop = showIcon ? (int) (icon.bottom + 4 * d) : (int) (pill.top + 8 * d);
-+            padBottom = (int) (h - pill.bottom + 12 * d);
-+        } else {
-+            float gap = (solid ? 10 : 7) * d;
-+            padStart = showIcon ? (int) (icon.right + gap) : (int) (pill.left + 14 * d);
-+            padTop = (int) (pill.top + 6 * d);
-+            padBottom = (int) (h - pill.bottom + 6 * d);
++            float inset = 14 * d;
++            int left = (int) (pill.left + inset);
++            int top = (int) (pill.top + inset);
++            icon.set(left, top, left + iconSize, top + iconSize);
++            padEnd = (int) (11 * d);
++            if (chipCount > 0) {
++                chipRows = true;
++                padStart = showIcon ? (int) (icon.right + 10 * d) : left;
++                padTop = icon.top;
++                padBottom = h - icon.bottom;
++                float rowHt = 26 * d;
++                float gap = 5 * d;
++                float areaTop = icon.bottom + 8 * d;
++                float areaBottom = pill.bottom - 10 * d;
++                int n = 0;
++                while (n < chipCount && n < MAX_CHIPS
++                        && areaTop + (n + 1) * rowHt + n * gap <= areaBottom) {
++                    float y = areaTop + n * (rowHt + gap);
++                    chips[n].set(pill.left + inset, y, pill.right - inset, y + rowHt);
++                    n++;
++                }
++                chipCountFit = n;
++            } else {
++                padStart = left;
++                padTop = showIcon ? (int) (icon.bottom + 4 * d) : (int) (pill.top + 8 * d);
++                padBottom = (int) (h - pill.bottom + 12 * d);
++            }
++            return;
++        }
++
++        // One-row pill
++        float inset = (solid ? 12 : 9) * d;
++        int left = (int) (pill.left + inset);
++        int top = (int) (pill.top + (pill.height() - iconSize) / 2f);
++        icon.set(left, top, left + iconSize, top + iconSize);
++        float gap = (solid ? 10 : 7) * d;
++        padStart = showIcon ? (int) (icon.right + gap) : (int) (pill.left + 14 * d);
++        padTop = (int) (pill.top + 6 * d);
++        padBottom = (int) (h - pill.bottom + 6 * d);
++        padEnd = (int) (11 * d);
++        if (chipCount > 0) {
++            float cd = Math.min(30 * d, pill.height() - 12 * d);
++            float cg = 6 * d;
++            float cy = pill.centerY();
++            float right = pill.right - 9 * d;
++            int n = 0;
++            while (n < chipCount && n < MAX_CHIPS) {
++                chips[n].set(right - cd, cy - cd / 2f, right, cy + cd / 2f);
++                right -= cd + cg;
++                n++;
++            }
++            chipCountFit = n;
++            padEnd = (int) (w - (right + cg) + 6 * d);
 +        }
 +    }
 +
-+    /** Draws the pill: the image if there is one, else solid or glass; then the icon's ring. */
-+    public void drawBackground(Canvas canvas, boolean solid, int tint, Bitmap image,
-+            SuperIconSettings s, Paint fill, Paint stroke, float d) {
++    /**
++     * Draws the pill: its fill (0 = translucent glass), then the image if there is one, then the
++     * icon's white ring for solid fills.
++     */
++    public void drawBackground(Canvas canvas, int fillColor, Bitmap image, SuperIconSettings s,
++            Paint fill, Paint stroke, float d) {
++        final boolean solid = fillColor != 0;
++        fill.setColor(solid ? fillColor : Color.argb(64, 255, 255, 255));
++        canvas.drawRoundRect(pill, radius, radius, fill);
 +        if (image != null) {
 +            SuperIconSettings.drawImage(canvas, image, pill, radius, s);
-+        } else if (solid) {
-+            fill.setColor(tint);
-+            canvas.drawRoundRect(pill, radius, radius, fill);
-+        } else {
-+            fill.setColor(Color.argb(64, 255, 255, 255));
-+            canvas.drawRoundRect(pill, radius, radius, fill);
-+        }
-+        if (!solid && image == null) {
++        } else if (!solid) {
 +            stroke.setColor(Color.argb(80, 255, 255, 255));
 +            canvas.drawRoundRect(pill, radius, radius, stroke);
 +        }
@@ -709,10 +1448,10 @@ index 0000000..1cededd
 +}
 diff --git a/src/com/android/launcher3/supericon/SuperIconSettings.java b/src/com/android/launcher3/supericon/SuperIconSettings.java
 new file mode 100644
-index 0000000..7ff2471
+index 0000000..cb11ee8
 --- /dev/null
 +++ b/src/com/android/launcher3/supericon/SuperIconSettings.java
-@@ -0,0 +1,306 @@
+@@ -0,0 +1,420 @@
 +/*
 + * Copyright (C) 2026 The Android Open Source Project
 + *
@@ -753,26 +1492,41 @@ index 0000000..7ff2471
 +import java.io.InputStream;
 +import java.util.ArrayList;
 +import java.util.Collections;
++import java.util.HashSet;
++import java.util.Map;
 +import java.util.Set;
 +import java.util.WeakHashMap;
++import java.util.concurrent.ConcurrentHashMap;
 +
 +/**
-+ * Per-supericon customisation: background image (zoom, pan, dimming), label colour, size and
-+ * position, and icon visibility. Stored in SharedPreferences (one JSON string per item id); the
-+ * background image is a PNG in the app's files directory.
++ * Per-supericon customisation: background colour and image (zoom in or out, pan, dimming), label
++ * colour, size and position, and what is shown (icon, label, app shortcuts). Stored in
++ * SharedPreferences (one JSON string per item id); the background image is a PNG in the app's
++ * files directory.
 + */
 +public final class SuperIconSettings {
 +
 +    private static final String PREFS = "supericon_settings";
 +    private static final int MAX_IMAGE_SIDE = 1024;
 +
-+    /** Background image zoom, 1..3. */
++    public static final int BG_STYLE = 0;
++    public static final int BG_ADAPTIVE = 1;
++    public static final int BG_CUSTOM = 2;
++
++    public static final float MIN_ZOOM = 0.3f;
++    public static final float MAX_ZOOM = 3f;
++
++    /** Background image zoom: below 1 the image is smaller than the pill, above 1 it is cropped. */
 +    public float imageZoom = 1f;
 +    /** Background image pan, -1..1. */
 +    public float imageX = 0f;
 +    public float imageY = 0f;
 +    /** Darkening on top of the image, 0..80 percent. */
 +    public int imageDim = 35;
++    /** Background: {@link #BG_STYLE} (from the style), {@link #BG_ADAPTIVE} (the icon's colour)
++     *  or {@link #BG_CUSTOM} ({@link #bgColor}). */
++    public int bgMode = BG_STYLE;
++    public int bgColor = 0xFF2D2D2D;
 +    /** Label colour, or 0 for automatic. */
 +    public int labelColor = 0;
 +    /** Label size multiplier, 0.5..1.6. */
@@ -782,6 +1536,8 @@ index 0000000..7ff2471
 +    public int labelH = -1;
 +    public int labelV = -1;
 +    public boolean showIcon = true;
++    public boolean showLabel = true;
++    public boolean showChips = true;
 +
 +    public interface Listener {
 +        void onSuperIconSettingsChanged(long itemId);
@@ -790,96 +1546,174 @@ index 0000000..7ff2471
 +    private static final Set<Listener> sListeners =
 +            Collections.newSetFromMap(new WeakHashMap<Listener, Boolean>());
 +    private static final LruCache<String, Bitmap> sImages = new LruCache<>(6);
++    /** Supericons currently on the workspace: item id to the app's component name. */
++    private static final Map<Long, String> sActive = new ConcurrentHashMap<>();
 +
-+    private static final Paint sImagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
++    private static final Paint sImagePaint =
++            new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
 +    private static final Paint sDimPaint = new Paint();
 +    private static final Path sClip = new Path();
 +    private static final RectF sDst = new RectF();
 +
-+    public SuperIconSettings copy() {
-+        SuperIconSettings s = new SuperIconSettings();
-+        s.imageZoom = imageZoom;
-+        s.imageX = imageX;
-+        s.imageY = imageY;
-+        s.imageDim = imageDim;
-+        s.labelColor = labelColor;
-+        s.labelScale = labelScale;
-+        s.labelH = labelH;
-+        s.labelV = labelV;
-+        s.showIcon = showIcon;
-+        return s;
++    // ------------------------------------------------------------ resolution
++
++    public static int defaultH(int spanX, int spanY) {
++        return spanX == 1 && spanY == 2 ? 1 : 0;
 +    }
 +
-+    public int effectiveH() {
-+        return labelH >= 0 ? labelH : 0;
++    public static int defaultV(int spanX, int spanY, int chipCount) {
++        if (spanY == 2 && spanX >= 2) {
++            return chipCount > 0 ? 1 : 2;
++        }
++        return spanY == 2 ? 2 : 1;
 +    }
 +
-+    public int effectiveV(boolean card) {
-+        return labelV >= 0 ? labelV : (card ? 2 : 1);
++    public int effectiveH(int spanX, int spanY) {
++        return labelH >= 0 ? labelH : defaultH(spanX, spanY);
 +    }
 +
-+    /** The label colour to use; {@code defaultColor} applies only to the plain glass style. */
-+    public int resolveLabelColor(boolean solid, int tint, boolean hasImage, int defaultColor) {
++    public int effectiveV(int spanX, int spanY, int chipCount) {
++        return labelV >= 0 ? labelV : defaultV(spanX, spanY, chipCount);
++    }
++
++    /** The pill's fill colour, or 0 for the translucent glass look. */
++    public int fillColor(boolean solidStyle, int tint) {
++        if (bgMode == BG_CUSTOM) {
++            return (bgColor >>> 24) == 0 ? (bgColor | 0xFF000000) : bgColor;
++        }
++        if (bgMode == BG_ADAPTIVE) {
++            return tint;
++        }
++        return solidStyle ? tint : 0;
++    }
++
++    /** The label colour to use; {@code defaultColor} applies only over the plain glass look. */
++    public int resolveLabelColor(int fill, boolean hasImage, int defaultColor) {
 +        if (labelColor != 0) {
 +            return labelColor;
 +        }
-+        if (hasImage) {
++        if (hasImage && imageZoom >= 1f) {
 +            return Color.WHITE;
 +        }
-+        if (solid) {
-+            return ColorUtils.calculateLuminance(tint) > 0.55
++        if (fill != 0) {
++            return ColorUtils.calculateLuminance(fill | 0xFF000000) > 0.55
 +                    ? Color.argb(230, 20, 20, 20) : Color.WHITE;
 +        }
 +        return defaultColor;
 +    }
 +
-+    // ---------------------------------------------------------------- storage
++    // --------------------------------------------------------------- storage
++
++    public JSONObject toJson() throws JSONException {
++        JSONObject o = new JSONObject();
++        o.put("zoom", imageZoom);
++        o.put("x", imageX);
++        o.put("y", imageY);
++        o.put("dim", imageDim);
++        o.put("bgMode", bgMode);
++        o.put("bgColor", bgColor);
++        o.put("color", labelColor);
++        o.put("scale", labelScale);
++        o.put("h", labelH);
++        o.put("v", labelV);
++        o.put("icon", showIcon);
++        o.put("label", showLabel);
++        o.put("chips", showChips);
++        return o;
++    }
++
++    public static SuperIconSettings fromJson(JSONObject o) {
++        SuperIconSettings s = new SuperIconSettings();
++        s.imageZoom = clamp((float) o.optDouble("zoom", 1), MIN_ZOOM, MAX_ZOOM);
++        s.imageX = clamp((float) o.optDouble("x", 0), -1f, 1f);
++        s.imageY = clamp((float) o.optDouble("y", 0), -1f, 1f);
++        s.imageDim = Math.max(0, Math.min(80, o.optInt("dim", 35)));
++        s.bgMode = Math.max(0, Math.min(2, o.optInt("bgMode", BG_STYLE)));
++        s.bgColor = o.optInt("bgColor", 0xFF2D2D2D);
++        s.labelColor = o.optInt("color", 0);
++        s.labelScale = clamp((float) o.optDouble("scale", 1), 0.5f, 1.6f);
++        s.labelH = Math.max(-1, Math.min(2, o.optInt("h", -1)));
++        s.labelV = Math.max(-1, Math.min(2, o.optInt("v", -1)));
++        s.showIcon = o.optBoolean("icon", true);
++        s.showLabel = o.optBoolean("label", true);
++        s.showChips = o.optBoolean("chips", true);
++        return s;
++    }
 +
 +    public static SuperIconSettings load(Context context, long id) {
-+        SuperIconSettings s = new SuperIconSettings();
 +        String json = prefs(context).getString(key(id), null);
 +        if (json == null) {
-+            return s;
++            return new SuperIconSettings();
 +        }
 +        try {
-+            JSONObject o = new JSONObject(json);
-+            s.imageZoom = clamp((float) o.optDouble("zoom", 1), 1f, 3f);
-+            s.imageX = clamp((float) o.optDouble("x", 0), -1f, 1f);
-+            s.imageY = clamp((float) o.optDouble("y", 0), -1f, 1f);
-+            s.imageDim = Math.max(0, Math.min(80, o.optInt("dim", 35)));
-+            s.labelColor = o.optInt("color", 0);
-+            s.labelScale = clamp((float) o.optDouble("scale", 1), 0.5f, 1.6f);
-+            s.labelH = Math.max(-1, Math.min(2, o.optInt("h", -1)));
-+            s.labelV = Math.max(-1, Math.min(2, o.optInt("v", -1)));
-+            s.showIcon = o.optBoolean("icon", true);
++            return fromJson(new JSONObject(json));
 +        } catch (JSONException e) {
 +            return new SuperIconSettings();
 +        }
-+        return s;
 +    }
 +
 +    public void save(Context context, long id) {
 +        try {
-+            JSONObject o = new JSONObject();
-+            o.put("zoom", imageZoom);
-+            o.put("x", imageX);
-+            o.put("y", imageY);
-+            o.put("dim", imageDim);
-+            o.put("color", labelColor);
-+            o.put("scale", labelScale);
-+            o.put("h", labelH);
-+            o.put("v", labelV);
-+            o.put("icon", showIcon);
-+            prefs(context).edit().putString(key(id), o.toString()).apply();
++            prefs(context).edit().putString(key(id), toJson().toString()).apply();
 +        } catch (JSONException e) {
 +            // Nothing sensible to do; the previous settings stay in place
 +        }
++    }
++
++    /** Whether anything (settings or an image) is stored for the item. */
++    public static boolean hasStored(Context context, long id) {
++        return prefs(context).contains(key(id)) || imageFile(context, id).exists();
 +    }
 +
 +    public static void delete(Context context, long id) {
 +        prefs(context).edit().remove(key(id)).apply();
 +        imageFile(context, id).delete();
 +        tempImageFile(context, id).delete();
++    }
++
++    /**
++     * Deletes the stored settings and images of items that are not in {@code keep}. Returns how
++     * many items were removed.
++     */
++    public static int deleteExcept(Context context, Set<Long> keep) {
++        Set<Long> removed = new HashSet<>();
++        SharedPreferences p = prefs(context);
++        SharedPreferences.Editor ed = p.edit();
++        for (String k : p.getAll().keySet()) {
++            if (!k.startsWith("s_")) {
++                continue;
++            }
++            try {
++                long id = Long.parseLong(k.substring(2));
++                if (!keep.contains(id)) {
++                    ed.remove(k);
++                    removed.add(id);
++                }
++            } catch (NumberFormatException e) {
++                // Not one of ours
++            }
++        }
++        ed.apply();
++        File[] files = dir(context).listFiles();
++        if (files != null) {
++            for (File f : files) {
++                String name = f.getName();
++                int dot = name.indexOf('.');
++                if (dot <= 0) {
++                    continue;
++                }
++                try {
++                    long id = Long.parseLong(name.substring(0, dot));
++                    if (!keep.contains(id)) {
++                        f.delete();
++                        removed.add(id);
++                    }
++                } catch (NumberFormatException e) {
++                    // Not one of ours
++                }
++            }
++        }
++        return removed.size();
 +    }
 +
 +    private static SharedPreferences prefs(Context context) {
@@ -890,7 +1724,23 @@ index 0000000..7ff2471
 +        return "s_" + id;
 +    }
 +
-+    // ----------------------------------------------------------------- images
++    // -------------------------------------------------------- active supericons
++
++    public static void setActive(long id, String component) {
++        if (component != null && !component.isEmpty()) {
++            sActive.put(id, component);
++        }
++    }
++
++    public static void removeActive(long id) {
++        sActive.remove(id);
++    }
++
++    public static Map<Long, String> activeItems() {
++        return new java.util.HashMap<>(sActive);
++    }
++
++    // ---------------------------------------------------------------- images
 +
 +    private static File dir(Context context) {
 +        File d = new File(context.getFilesDir(), "supericon");
@@ -966,7 +1816,10 @@ index 0000000..7ff2471
 +        }
 +    }
 +
-+    /** Draws the image cropped to the rounded pill, with the given zoom, pan and dimming. */
++    /**
++     * Draws the image inside the rounded pill. At zoom 1 it just covers the pill; above that it
++     * is cropped, below it the image is smaller than the pill and the background shows around it.
++     */
 +    public static void drawImage(Canvas canvas, Bitmap bmp, RectF pill, float radius,
 +            SuperIconSettings s) {
 +        float bw = bmp.getWidth();
@@ -974,10 +1827,10 @@ index 0000000..7ff2471
 +        float scale = Math.max(pill.width() / bw, pill.height() / bh) * s.imageZoom;
 +        float sw = bw * scale;
 +        float sh = bh * scale;
-+        float maxX = (sw - pill.width()) / 2f;
-+        float maxY = (sh - pill.height()) / 2f;
-+        float left = pill.centerX() - sw / 2f + s.imageX * maxX;
-+        float top = pill.centerY() - sh / 2f + s.imageY * maxY;
++        float rangeX = Math.abs(sw - pill.width()) / 2f;
++        float rangeY = Math.abs(sh - pill.height()) / 2f;
++        float left = pill.centerX() - sw / 2f + s.imageX * rangeX;
++        float top = pill.centerY() - sh / 2f + s.imageY * rangeY;
 +        sClip.reset();
 +        sClip.addRoundRect(pill, radius, radius, Path.Direction.CW);
 +        canvas.save();
@@ -986,12 +1839,12 @@ index 0000000..7ff2471
 +        canvas.drawBitmap(bmp, null, sDst, sImagePaint);
 +        if (s.imageDim > 0) {
 +            sDimPaint.setColor(Color.argb(s.imageDim * 255 / 100, 0, 0, 0));
-+            canvas.drawRect(pill, sDimPaint);
++            canvas.drawRect(sDst, sDimPaint);
 +        }
 +        canvas.restore();
 +    }
 +
-+    // -------------------------------------------------------------- listeners
++    // ------------------------------------------------------------- listeners
 +
 +    public static void addListener(Listener l) {
 +        synchronized (sListeners) {
@@ -1020,43 +1873,60 @@ index 0000000..7ff2471
 +    }
 +}
 diff --git a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android/launcher3/views/SuperIconView.java
-index 11f19e4..8c39980 100644
+index 11f19e4..dd1151c 100644
 --- a/src/com/android/launcher3/views/SuperIconView.java
 +++ b/src/com/android/launcher3/views/SuperIconView.java
-@@ -16,11 +16,11 @@
+@@ -15,57 +15,96 @@
+  */
  package com.android.launcher3.views;
  
++import android.content.ComponentName;
  import android.content.Context;
++import android.content.pm.ShortcutInfo;
 +import android.content.res.ColorStateList;
 +import android.graphics.Bitmap;
  import android.graphics.Canvas;
 -import android.graphics.Color;
  import android.graphics.Paint;
++import android.graphics.Path;
  import android.graphics.Rect;
--import android.graphics.RectF;
+ import android.graphics.RectF;
  import android.graphics.Region;
  import android.graphics.drawable.Drawable;
++import android.os.AsyncTask;
++import android.os.UserHandle;
  import android.text.TextPaint;
-@@ -29,10 +29,11 @@ import android.util.AttributeSet;
+ import android.text.TextUtils;
+ import android.util.AttributeSet;
  import android.util.TypedValue;
  import android.view.Gravity;
- 
+-
 -import androidx.core.graphics.ColorUtils;
++import android.view.MotionEvent;
  
  import com.android.launcher3.WorkspaceItemInfo;
  import com.android.launcher3.graphics.IconShape;
++import com.android.launcher3.popup.PopupPopulator;
++import com.android.launcher3.shortcuts.DeepShortcutManager;
 +import com.android.launcher3.supericon.SuperIconLayout;
 +import com.android.launcher3.supericon.SuperIconSettings;
++
++import java.util.ArrayList;
++import java.util.List;
  
  /**
-  * An app icon that spans several cells ("supericon") on the workspace: 2x1, 3x1 or 2x2. The
-@@ -41,30 +42,36 @@ import com.android.launcher3.graphics.IconShape;
+- * An app icon that spans several cells ("supericon") on the workspace: 2x1, 3x1 or 2x2. The
+- * regular label below the icon is not used; the app name is drawn inside the supericon.
++ * An app icon that spans several cells ("supericon") on the workspace: 2x1, 3x1, 4x1, 2x2 or
++ * 1x2. The regular label below the icon is not used; the app name is drawn inside the supericon.
+  * The corner radius follows the icon shape.
   *
-  * Two styles: a translucent glass pill, and a solid pill tinted with the icon's dominant colour
-  * (the icon sits in a white ring). In the 2x2 size the icon goes in the top-left corner and the
+- * Two styles: a translucent glass pill, and a solid pill tinted with the icon's dominant colour
+- * (the icon sits in a white ring). In the 2x2 size the icon goes in the top-left corner and the
 - * label at the bottom, forming a card.
-+ * label below it. Each supericon can also have a background image and its own label colour,
-+ * size and position, see {@link SuperIconSettings}.
++ * Each supericon has a style (glass or solid) and can have its own background colour and image,
++ * label colour, size and position, see {@link SuperIconSettings}. The wider sizes show the app's
++ * shortcuts as tappable chips, see {@link SuperIconLayout}.
 + *
 + * The icon is always drawn by {@link #onDraw}, not as a compound drawable, so that its place does
 + * not depend on the label.
@@ -1074,28 +1944,53 @@ index 11f19e4..8c39980 100644
 +    /** The label never shrinks below this fraction of its (scaled) size. */
      private static final float MIN_TEXT_SCALE = 0.78f;
  
++    /** An app shortcut shown as a chip. */
++    private static final class Chip {
++        String id;
++        String pkg;
++        UserHandle user;
++        CharSequence label;
++        Bitmap icon;
++    }
++
      private final Paint mFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
      private final Paint mStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 -    private final RectF mPill = new RectF();
++    private final Paint mBitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
++    private final TextPaint mChipText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
 +    private final SuperIconLayout mLayout = new SuperIconLayout();
      private final TextPaint mMeasurePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
 -    private final Rect mTmpBounds = new Rect();
      private final Rect mOldBounds = new Rect();
++    private final Path mChipClip = new Path();
++    private final RectF mTmpRect = new RectF();
      private final float mDensity;
 +    private final ColorStateList mDefaultTextColors;
++    private final List<Chip> mChips = new ArrayList<>();
  
+-    private boolean mSolid;
+-    private boolean mCard;
 +    private long mItemId = -1;
++    private int mSpanX = 2;
++    private int mSpanY = 1;
++    private ComponentName mComponent;
++    private UserHandle mUser;
 +    private SuperIconSettings mSettings = new SuperIconSettings();
 +    private Bitmap mImage;
 +    private Drawable mShownIcon;
-     private boolean mSolid;
-     private boolean mCard;
++    private boolean mSolidStyle;
++    private int mFill;
++    private int mLabelColor;
      private int mTint = 0xFF5F5E5A;
 -    private float mCornerBase;
      private float mBaseTextSize;
++    private int mLoadToken;
++    private int mDownChip = -1;
++    private int mPendingChip = -1;
  
      public SuperIconView(Context context) {
-@@ -81,6 +88,7 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         this(context, null);
+@@ -81,6 +120,7 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          mStrokePaint.setStyle(Paint.Style.STROKE);
          mStrokePaint.setStrokeWidth(mDensity);
          mBaseTextSize = getTextSize();
@@ -1103,7 +1998,7 @@ index 11f19e4..8c39980 100644
      }
  
      /** The label is always shown inside a supericon, even if app labels are hidden. */
-@@ -89,11 +97,39 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -89,69 +129,225 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          return false;
      }
  
@@ -1111,11 +2006,15 @@ index 11f19e4..8c39980 100644
 +    protected void onAttachedToWindow() {
 +        super.onAttachedToWindow();
 +        SuperIconSettings.addListener(this);
++        if (mComponent != null) {
++            SuperIconSettings.setActive(mItemId, mComponent.flattenToShortString());
++        }
 +    }
 +
 +    @Override
 +    protected void onDetachedFromWindow() {
 +        SuperIconSettings.removeListener(this);
++        SuperIconSettings.removeActive(mItemId);
 +        super.onDetachedFromWindow();
 +    }
 +
@@ -1124,6 +2023,7 @@ index 11f19e4..8c39980 100644
 +        if (itemId == mItemId) {
 +            loadSettings();
 +            applyStyle();
++            loadChips();
 +            invalidate();
 +        }
 +    }
@@ -1135,27 +2035,44 @@ index 11f19e4..8c39980 100644
 +
      @Override
      public void applyFromWorkspaceItem(WorkspaceItemInfo info, boolean promiseStateChanged) {
-+        mItemId = info.id;
-         mSolid = WorkspaceItemInfo.isSolidStyle(info.superStyle);
-         mCard = info.spanY > 1;
+-        mSolid = WorkspaceItemInfo.isSolidStyle(info.superStyle);
+-        mCard = info.spanY > 1;
 -        // Must be set before the icon is applied so the compound drawable gets the right size
++        mItemId = info.id;
++        mSpanX = Math.max(1, info.spanX);
++        mSpanY = Math.max(1, info.spanY);
++        mSolidStyle = WorkspaceItemInfo.isSolidStyle(info.superStyle);
++        mComponent = info.getTargetComponent();
++        mUser = info.user;
 +        loadSettings();
 +        // Must be set before the icon is applied so the icon gets the right size
          setIconSize(iconSize());
          super.applyFromWorkspaceItem(info, promiseStateChanged);
          mTint = info.iconColor != 0 ? (info.iconColor | 0xFF000000) : 0xFF5F5E5A;
-@@ -101,44 +137,49 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
++        if (isAttachedToWindow() && mComponent != null) {
++            SuperIconSettings.setActive(mItemId, mComponent.flattenToShortString());
++        }
+         applyStyle();
++        loadChips();
          invalidate();
      }
  
 -    private boolean tintIsLight() {
 -        return ColorUtils.calculateLuminance(mTint) > 0.55;
--    }
--
++    private int chipCountForLayout() {
++        if (!mSettings.showChips) {
++            return 0;
++        }
++        return Math.min(SuperIconLayout.maxChips(mSpanX, mSpanY), mChips.size());
+     }
+ 
      private void applyStyle() {
 -        setTextSize(TypedValue.COMPLEX_UNIT_PX, mBaseTextSize);
-+        float size = mBaseTextSize * mSettings.labelScale;
-+        setTextSize(TypedValue.COMPLEX_UNIT_PX, size);
++        mFill = mSettings.fillColor(mSolidStyle, mTint);
++        mLabelColor = mSettings.resolveLabelColor(mFill, mImage != null,
++                mDefaultTextColors.getDefaultColor());
++
++        setTextSize(TypedValue.COMPLEX_UNIT_PX, mBaseTextSize * mSettings.labelScale);
          // Allow two lines instead of the single (truncated) line of regular workspace labels
          setSingleLine(false);
          setMinLines(1);
@@ -1163,32 +2080,135 @@ index 11f19e4..8c39980 100644
          setEllipsize(TextUtils.TruncateAt.END);
 -        if (mSolid) {
 -            setTextColor(tintIsLight() ? Color.argb(230, 20, 20, 20) : Color.WHITE);
--        }
--        if (mCard) {
--            setGravity(Gravity.BOTTOM | Gravity.START);
--            setCompoundDrawablePadding(0);
--            setCompoundDrawables(null, null, null, null);
++        setTextColor(mLabelColor);
++        // Fully transparent text also drops the text shadows
++        setTextVisibility(mSettings.showLabel);
 +
-+        int auto = mSettings.resolveLabelColor(mSolid, mTint, mImage != null,
-+                mDefaultTextColors.getDefaultColor());
-+        if (mSettings.labelColor == 0 && !mSolid && mImage == null) {
-+            setTextColor(mDefaultTextColors);
-         } else {
--            setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
--            setCompoundDrawablePadding((int) ((mSolid ? 10 : 7) * mDensity));
-+            setTextColor(auto);
-         }
-+
-+        int h = mSettings.effectiveH();
-+        int v = mSettings.effectiveV(mCard);
++        int h = mSettings.effectiveH(mSpanX, mSpanY);
++        int v = mSettings.effectiveV(mSpanX, mSpanY, chipCountForLayout());
 +        int gh = h == 0 ? Gravity.START : (h == 1 ? Gravity.CENTER_HORIZONTAL : Gravity.END);
 +        int gv = v == 0 ? Gravity.TOP : (v == 1 ? Gravity.CENTER_VERTICAL : Gravity.BOTTOM);
 +        setGravity(gh | gv);
 +        setCompoundDrawables(null, null, null, null);
-         requestLayout();
++        requestLayout();
++    }
++
++    // ------------------------------------------------------------------ chips
++
++    /** Loads the app's shortcuts (and their icons) in the background. */
++    private void loadChips() {
++        final int max = SuperIconLayout.maxChips(mSpanX, mSpanY);
++        final ComponentName component = mComponent;
++        final UserHandle user = mUser;
++        if (!mSettings.showChips || max == 0 || component == null || user == null) {
++            if (!mChips.isEmpty()) {
++                mChips.clear();
++                applyStyle();
++            }
++            return;
+         }
+-        if (mCard) {
+-            setGravity(Gravity.BOTTOM | Gravity.START);
+-            setCompoundDrawablePadding(0);
+-            setCompoundDrawables(null, null, null, null);
+-        } else {
+-            setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+-            setCompoundDrawablePadding((int) ((mSolid ? 10 : 7) * mDensity));
++        final Context ctx = getContext().getApplicationContext();
++        final int token = ++mLoadToken;
++        final int dpi = getResources().getDisplayMetrics().densityDpi;
++        final int iconPx = Math.round(32 * mDensity);
++        AsyncTask.THREAD_POOL_EXECUTOR.execute(() -> {
++            final List<Chip> out = new ArrayList<>();
++            try {
++                DeepShortcutManager manager = DeepShortcutManager.getInstance(ctx);
++                List<ShortcutInfo> list = manager.queryForShortcutsContainer(component, user);
++                list = PopupPopulator.sortAndFilterShortcuts(list, null);
++                for (ShortcutInfo si : list) {
++                    if (out.size() >= max) {
++                        break;
++                    }
++                    Chip c = new Chip();
++                    c.id = si.getId();
++                    c.pkg = si.getPackage();
++                    c.user = user;
++                    c.label = si.getShortLabel();
++                    Drawable dr = manager.getShortcutIconDrawable(si, dpi);
++                    if (dr != null) {
++                        Bitmap b = Bitmap.createBitmap(iconPx, iconPx, Bitmap.Config.ARGB_8888);
++                        dr.setBounds(0, 0, iconPx, iconPx);
++                        dr.draw(new Canvas(b));
++                        c.icon = b;
++                    }
++                    out.add(c);
++                }
++            } catch (RuntimeException e) {
++                out.clear();
++            }
++            post(() -> {
++                if (token != mLoadToken) {
++                    return;
++                }
++                mChips.clear();
++                mChips.addAll(out);
++                applyStyle();
++                invalidate();
++            });
++        });
++    }
++
++    private int chipAt(float x, float y) {
++        float slop = 4 * mDensity;
++        for (int i = 0; i < mLayout.chipCountFit && i < mChips.size(); i++) {
++            RectF r = mLayout.chips[i];
++            if (x >= r.left - slop && x <= r.right + slop
++                    && y >= r.top - slop && y <= r.bottom + slop) {
++                return i;
++            }
+         }
+-        requestLayout();
++        return -1;
      }
  
 -    /** In the card size the icon is drawn by {@link #onDraw}, not as a compound drawable. */
++    @Override
++    public boolean onTouchEvent(MotionEvent event) {
++        switch (event.getActionMasked()) {
++            case MotionEvent.ACTION_DOWN:
++                mDownChip = chipAt(event.getX(), event.getY());
++                mPendingChip = -1;
++                break;
++            case MotionEvent.ACTION_UP:
++                mPendingChip = mDownChip >= 0 && chipAt(event.getX(), event.getY()) == mDownChip
++                        ? mDownChip : -1;
++                mDownChip = -1;
++                break;
++            case MotionEvent.ACTION_CANCEL:
++                mDownChip = -1;
++                mPendingChip = -1;
++                break;
++            default:
++                break;
++        }
++        return super.onTouchEvent(event);
++    }
++
++    /** A tap on a chip starts that shortcut instead of the app. */
++    @Override
++    public boolean performClick() {
++        int chip = mPendingChip;
++        mPendingChip = -1;
++        if (chip >= 0 && chip < mChips.size()) {
++            Chip c = mChips.get(chip);
++            DeepShortcutManager.getInstance(getContext())
++                    .startShortcut(c.pkg, c.id, null, null, c.user);
++            return true;
++        }
++        return super.performClick();
++    }
++
++    // ---------------------------------------------------------------- the icon
++
 +    /** The icon is drawn by {@link #onDraw}; this only prepares it. */
      @Override
      protected void applyCompoundDrawables(Drawable icon) {
@@ -1216,12 +2236,13 @@ index 11f19e4..8c39980 100644
      }
  
      private int regularIconSize() {
-@@ -147,11 +188,11 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         return ActivityContext.lookupContext(getContext()).getWallpaperDeviceProfile().iconSizePx;
+     }
  
-     /** Icon size: smaller than a regular icon in a one-row pill, to leave room for the label. */
+-    /** Icon size: smaller than a regular icon in a one-row pill, to leave room for the label. */
      private int iconSize() {
 -        return mCard ? regularIconSize() : Math.round(regularIconSize() * ICON_SCALE);
-+        return mCard ? regularIconSize() : Math.round(regularIconSize() * 0.78f);
++        return SuperIconLayout.iconSizeFor(mSpanX, mSpanY, regularIconSize());
      }
  
      /** Corner radius as a fraction (0..0.5) of the pill height, from the current icon shape. */
@@ -1230,7 +2251,7 @@ index 11f19e4..8c39980 100644
          IconShape shape = IconShape.getShape();
          if (shape == sShape) {
              return sCornerRatio;
-@@ -176,9 +217,17 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -176,35 +372,31 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          return ratio;
      }
  
@@ -1250,8 +2271,10 @@ index 11f19e4..8c39980 100644
 +        return regularIconSize();
      }
  
++    // ------------------------------------------------------------ measure, draw
++
      @Override
-@@ -186,25 +235,11 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
          int w = MeasureSpec.getSize(widthMeasureSpec);
          int h = MeasureSpec.getSize(heightMeasureSpec);
          if (w > 0 && h > 0) {
@@ -1274,15 +2297,15 @@ index 11f19e4..8c39980 100644
 -                textAvail = w - padStart - padEnd - size - getCompoundDrawablePadding();
 -            }
 -            fitText(textAvail);
-+            mLayout.compute(w, h, mCard, mSolid, mSettings.showIcon, regularIconSize(), mDensity,
-+                    cornerRatio());
++            mLayout.compute(w, h, mSpanX, mSpanY, mFill != 0, mSettings.showIcon,
++                    regularIconSize(), mDensity, cornerRatio(), chipCountForLayout());
 +            setPaddingRelative(mLayout.padStart, mLayout.padTop, mLayout.padEnd,
 +                    mLayout.padBottom);
 +            fitText(w - mLayout.padStart - mLayout.padEnd);
          }
          super.onMeasure(widthMeasureSpec, heightMeasureSpec);
      }
-@@ -218,8 +253,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -218,8 +410,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          if (text == null || text.length() == 0 || available <= 0) {
              return;
          }
@@ -1294,7 +2317,7 @@ index 11f19e4..8c39980 100644
          mMeasurePaint.set(getPaint());
          mMeasurePaint.setTypeface(getPaint().getTypeface());
          String[] words = text.toString().split("\\s+");
-@@ -242,48 +278,21 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -242,48 +435,71 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
  
      @Override
      public void getIconBounds(Rect outBounds) {
@@ -1324,31 +2347,77 @@ index 11f19e4..8c39980 100644
 -                canvas.drawRoundRect(mPill, r, r, mFillPaint);
 -                mStrokePaint.setColor(Color.argb(80, 255, 255, 255));
 -                canvas.drawRoundRect(mPill, r, r, mStrokePaint);
--            }
--            if (mCard) {
--                drawCardIcon(canvas);
 +        if (mLayout.pill.width() > 0) {
-+            mLayout.drawBackground(canvas, mSolid, mTint, mImage, mSettings, mFillPaint,
-+                    mStrokePaint, mDensity);
++            mLayout.drawBackground(canvas, mFill, mImage, mSettings, mFillPaint, mStrokePaint,
++                    mDensity);
 +            if (mSettings.showIcon && mShownIcon != null) {
 +                mOldBounds.set(mShownIcon.getBounds());
 +                mShownIcon.setBounds(mLayout.icon);
 +                mShownIcon.draw(canvas);
 +                mShownIcon.setBounds(mOldBounds);
              }
+-            if (mCard) {
+-                drawCardIcon(canvas);
++            if (mSettings.showChips) {
++                drawChips(canvas);
+             }
          }
          super.onDraw(canvas);
      }
--
+ 
 -    private void drawCardIcon(Canvas canvas) {
 -        Drawable icon = getIcon();
 -        if (icon == null) {
 -            return;
--        }
++    private void drawChips(Canvas canvas) {
++        int n = Math.min(mLayout.chipCountFit, mChips.size());
++        for (int i = 0; i < n; i++) {
++            Chip c = mChips.get(i);
++            RectF r = mLayout.chips[i];
++            if (mLayout.chipRows) {
++                mFillPaint.setColor(mFill != 0
++                        ? android.graphics.Color.argb(60, 255, 255, 255)
++                        : android.graphics.Color.argb(46, 255, 255, 255));
++                float rad = r.height() / 2f;
++                canvas.drawRoundRect(r, rad, rad, mFillPaint);
++                float left = r.left + 6 * mDensity;
++                if (c.icon != null) {
++                    float s = 18 * mDensity;
++                    mTmpRect.set(left, r.centerY() - s / 2f, left + s, r.centerY() + s / 2f);
++                    drawRoundIcon(canvas, c.icon, mTmpRect);
++                    left += s + 6 * mDensity;
++                }
++                mChipText.setTextSize(mBaseTextSize * 0.9f);
++                mChipText.setColor(mLabelColor);
++                float avail = r.right - 8 * mDensity - left;
++                CharSequence label = TextUtils.ellipsize(c.label == null ? "" : c.label,
++                        mChipText, Math.max(0, avail), TextUtils.TruncateAt.END);
++                Paint.FontMetrics fm = mChipText.getFontMetrics();
++                float baseline = r.centerY() - (fm.ascent + fm.descent) / 2f;
++                canvas.drawText(label, 0, label.length(), left, baseline, mChipText);
++            } else {
++                mFillPaint.setColor(android.graphics.Color.argb(235, 255, 255, 255));
++                canvas.drawCircle(r.centerX(), r.centerY(), r.width() / 2f, mFillPaint);
++                if (c.icon != null) {
++                    float inset = 3 * mDensity;
++                    mTmpRect.set(r.left + inset, r.top + inset, r.right - inset, r.bottom - inset);
++                    drawRoundIcon(canvas, c.icon, mTmpRect);
++                }
++            }
+         }
 -        getIconBounds(mTmpBounds);
 -        mOldBounds.set(icon.getBounds());
 -        icon.setBounds(mTmpBounds);
 -        icon.draw(canvas);
 -        icon.setBounds(mOldBounds);
--    }
++    }
++
++    private void drawRoundIcon(Canvas canvas, Bitmap bmp, RectF dst) {
++        mChipClip.reset();
++        mChipClip.addCircle(dst.centerX(), dst.centerY(), dst.width() / 2f, Path.Direction.CW);
++        canvas.save();
++        canvas.clipPath(mChipClip);
++        canvas.drawBitmap(bmp, null, dst, mBitmapPaint);
++        canvas.restore();
+     }
  }
