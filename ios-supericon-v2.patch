@@ -1,0 +1,515 @@
+diff --git a/res/values/supericon_strings.xml b/res/values/supericon_strings.xml
+index f9df4a7..35aa42d 100644
+--- a/res/values/supericon_strings.xml
++++ b/res/values/supericon_strings.xml
+@@ -1,10 +1,11 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+     <string name="supericon_menu">Supericon</string>
+-    <string name="supericon_size_wide">Ubah ke 2×1</string>
++    <string name="supericon_size_2x1">Ubah ke 2×1</string>
++    <string name="supericon_size_3x1">Ubah ke 3×1</string>
++    <string name="supericon_size_2x2">Ubah ke 2×2</string>
+     <string name="supericon_size_normal">Ubah ke 1×1</string>
+-    <string name="supericon_style_side">Gaya A: ikon kiri</string>
+-    <string name="supericon_style_backdrop">Gaya B: ikon latar</string>
+-    <string name="supericon_style_card">Gaya C: kartu info</string>
+-    <string name="supericon_no_space">Tidak ada ruang kosong di sebelah ikon</string>
++    <string name="supericon_style_glass">Gaya kaca</string>
++    <string name="supericon_style_solid">Gaya warna</string>
++    <string name="supericon_no_space">Tidak ada ruang kosong di sekitar ikon</string>
+ </resources>
+diff --git a/src/com/android/launcher3/WorkspaceItemInfo.java b/src/com/android/launcher3/WorkspaceItemInfo.java
+index 425fa10..bb432f0 100644
+--- a/src/com/android/launcher3/WorkspaceItemInfo.java
++++ b/src/com/android/launcher3/WorkspaceItemInfo.java
+@@ -69,20 +69,29 @@ public class WorkspaceItemInfo extends ItemInfoWithIcon {
+      */
+     public static final int FLAG_SUPPORTS_WEB_UI = 16; //0B10000;
+ 
+-    /** Supericon (2x1 app icon) styles, stored in the options column. 0 = regular icon. */
++    /** Supericon (2x1, 3x1 or 2x2 app icon) styles, stored in the options column. 0 = regular. */
+     public static final int SUPER_NONE = 0;
+-    /** Icon on the left, label on the right. */
++    /** Translucent glass pill. */
+     public static final int SUPER_STYLE_SIDE = 1;
+-    /** Large faded icon as the background, label inside. */
+-    public static final int SUPER_STYLE_BACKDROP = 2;
+-    /** Like the side style, with a second (currently empty) info line. */
+-    public static final int SUPER_STYLE_CARD = 3;
++    /** Solid pill tinted with the icon's dominant colour. */
++    public static final int SUPER_STYLE_SOLID = 2;
++    /** Legacy value (old "card" style); drawn like {@link #SUPER_STYLE_SOLID}. */
++    public static final int SUPER_STYLE_LEGACY = 3;
+ 
+-    /** One of the SUPER_* values. Only meaningful when {@link #spanX} is 2. */
++    /** One of the SUPER_* values. Only meaningful when the item spans more than one cell. */
+     public int superStyle = SUPER_NONE;
+ 
+     public boolean isSuperIcon() {
+-        return spanX > 1 && superStyle != SUPER_NONE;
++        return (spanX > 1 || spanY > 1) && superStyle != SUPER_NONE;
++    }
++
++    public static boolean isSolidStyle(int style) {
++        return style == SUPER_STYLE_SOLID || style == SUPER_STYLE_LEGACY;
++    }
++
++    /** Whether a span is one of the sizes a supericon can take: 2x1, 3x1 or 2x2. */
++    public static boolean isSuperSpan(int spanX, int spanY) {
++        return (spanY == 1 && (spanX == 2 || spanX == 3)) || (spanX == 2 && spanY == 2);
+     }
+ 
+     /**
+diff --git a/src/com/android/launcher3/model/LoaderTask.java b/src/com/android/launcher3/model/LoaderTask.java
+index 06312be..448626e 100644
+--- a/src/com/android/launcher3/model/LoaderTask.java
++++ b/src/com/android/launcher3/model/LoaderTask.java
+@@ -560,10 +560,12 @@ public class LoaderTask implements Runnable {
+                                 if (info.itemType == LauncherSettings.Favorites.ITEM_TYPE_APPLICATION
+                                         && info.container
+                                         == LauncherSettings.Favorites.CONTAINER_DESKTOP
+-                                        && c.getInt(spanXIndex) == 2) {
+-                                    // Supericon: a 2x1 app icon on the workspace
++                                        && WorkspaceItemInfo.isSuperSpan(
++                                                c.getInt(spanXIndex), c.getInt(spanYIndex))) {
++                                    // Supericon: a 2x1, 3x1 or 2x2 app icon on the workspace
+                                     int superStyle = c.getInt(optionsIndex) & 0x3;
+-                                    info.spanX = 2;
++                                    info.spanX = c.getInt(spanXIndex);
++                                    info.spanY = c.getInt(spanYIndex);
+                                     info.superStyle = superStyle == WorkspaceItemInfo.SUPER_NONE
+                                             ? WorkspaceItemInfo.SUPER_STYLE_SIDE : superStyle;
+                                 }
+diff --git a/src/com/android/launcher3/popup/SuperIconMenu.java b/src/com/android/launcher3/popup/SuperIconMenu.java
+index 1d76a25..242a23e 100644
+--- a/src/com/android/launcher3/popup/SuperIconMenu.java
++++ b/src/com/android/launcher3/popup/SuperIconMenu.java
+@@ -31,10 +31,15 @@ import com.android.launcher3.views.OptionsPopupView.OptionItem;
+ import java.util.ArrayList;
+ 
+ /**
+- * Menu for turning a workspace app icon into a 2x1 supericon and choosing its style.
++ * Menu for turning a workspace app icon into a supericon (2x1, 3x1 or 2x2), choosing its size
++ * and its style (glass or solid).
+  */
+ public final class SuperIconMenu {
+ 
++    private static final int[][] SIZES = {{2, 1}, {3, 1}, {2, 2}};
++    private static final int[] SIZE_LABELS = {
++            R.string.supericon_size_2x1, R.string.supericon_size_3x1, R.string.supericon_size_2x2};
++
+     private SuperIconMenu() { }
+ 
+     public static void show(Launcher launcher, WorkspaceItemInfo info) {
+@@ -46,46 +51,69 @@ public final class SuperIconMenu {
+         launcher.getDragLayer().getDescendantRectRelativeToSelf(icon, rect);
+ 
+         final boolean isSuper = info.isSuperIcon();
+-        final int current = isSuper ? info.superStyle : WorkspaceItemInfo.SUPER_NONE;
+-        final int[] styles = {
+-                WorkspaceItemInfo.SUPER_STYLE_SIDE,
+-                WorkspaceItemInfo.SUPER_STYLE_BACKDROP,
+-                WorkspaceItemInfo.SUPER_STYLE_CARD};
+-        final int[] labels = {
+-                R.string.supericon_style_side,
+-                R.string.supericon_style_backdrop,
+-                R.string.supericon_style_card};
++        final int currentStyle = isSuper ? info.superStyle : WorkspaceItemInfo.SUPER_NONE;
++        // A new supericon starts with the solid style; an existing one keeps its style.
++        final int style = isSuper ? currentStyle : WorkspaceItemInfo.SUPER_STYLE_SOLID;
+ 
+         ArrayList<OptionItem> items = new ArrayList<>();
+         if (isSuper) {
+             items.add(new OptionItem(R.string.supericon_size_normal, R.drawable.ic_widget, 0,
+                     v -> {
+-                        apply(launcher, info, WorkspaceItemInfo.SUPER_NONE);
++                        apply(launcher, info, WorkspaceItemInfo.SUPER_NONE, 1, 1);
+                         return true;
+                     }));
+         }
+-        for (int i = 0; i < styles.length; i++) {
+-            final int style = styles[i];
+-            if (style == current) {
++        for (int i = 0; i < SIZES.length; i++) {
++            final int sx = SIZES[i][0];
++            final int sy = SIZES[i][1];
++            if (isSuper && info.spanX == sx && info.spanY == sy) {
+                 continue;
+             }
++            items.add(new OptionItem(SIZE_LABELS[i], R.drawable.ic_widget, 0,
++                    v -> {
++                        apply(launcher, info, style, sx, sy);
++                        return true;
++                    }));
++        }
++        if (isSuper) {
++            final boolean solid = WorkspaceItemInfo.isSolidStyle(currentStyle);
++            final int otherStyle = solid
++                    ? WorkspaceItemInfo.SUPER_STYLE_SIDE : WorkspaceItemInfo.SUPER_STYLE_SOLID;
+             items.add(new OptionItem(
+-                    isSuper ? labels[i] : R.string.supericon_size_wide,
++                    solid ? R.string.supericon_style_glass : R.string.supericon_style_solid,
+                     R.drawable.ic_widget, 0,
+                     v -> {
+-                        apply(launcher, info, style);
++                        apply(launcher, info, otherStyle, info.spanX, info.spanY);
+                         return true;
+                     }));
+-            if (!isSuper) {
+-                // A regular icon gets a single entry that turns it into a 2x1 supericon
+-                // (style A); the style can be changed afterwards from the same menu.
+-                break;
+-            }
+         }
+         OptionsPopupView.show(launcher, new RectF(rect), items);
+     }
+ 
+-    private static void apply(Launcher launcher, WorkspaceItemInfo info, int newStyle) {
++    /**
++     * Finds a free region of the given size that contains the cell (cellX, cellY), preferring
++     * to keep the origin and grow to the right and downwards. The icon's own cells must already
++     * be marked as unoccupied. Returns null if there is no room.
++     */
++    private static int[] findSpot(CellLayout layout, int cellX, int cellY, int spanX, int spanY) {
++        for (int dy = 0; dy < spanY; dy++) {
++            for (int dx = 0; dx < spanX; dx++) {
++                int x = cellX - dx;
++                int y = cellY - dy;
++                if (x < 0 || y < 0 || x + spanX > layout.getCountX()
++                        || y + spanY > layout.getCountY()) {
++                    continue;
++                }
++                if (layout.isRegionVacant(x, y, spanX, spanY)) {
++                    return new int[] {x, y};
++                }
++            }
++        }
++        return null;
++    }
++
++    private static void apply(Launcher launcher, WorkspaceItemInfo info, int newStyle,
++            int newSpanX, int newSpanY) {
+         View old = launcher.getWorkspace().getHomescreenIconByItemId(info.id);
+         if (old == null || !(old.getParent() instanceof ShortcutAndWidgetContainer)
+                 || !(old.getParent().getParent() instanceof CellLayout)) {
+@@ -93,29 +121,25 @@ public final class SuperIconMenu {
+         }
+         CellLayout layout = (CellLayout) old.getParent().getParent();
+         CellLayout.LayoutParams lp = (CellLayout.LayoutParams) old.getLayoutParams();
+-        final int newSpan = newStyle == WorkspaceItemInfo.SUPER_NONE ? 1 : 2;
+         int newX = lp.cellX;
++        int newY = lp.cellY;
+ 
+-        if (newSpan == 2 && info.spanX < 2) {
++        if (newSpanX > info.spanX || newSpanY > info.spanY) {
+             layout.markCellsAsUnoccupiedForView(old);
+-            boolean right = lp.cellX + 1 < layout.getCountX()
+-                    && layout.isRegionVacant(lp.cellX + 1, lp.cellY, 1, 1);
+-            boolean left = !right && lp.cellX - 1 >= 0
+-                    && layout.isRegionVacant(lp.cellX - 1, lp.cellY, 1, 1);
++            int[] spot = findSpot(layout, lp.cellX, lp.cellY, newSpanX, newSpanY);
+             layout.markCellsAsOccupiedForView(old);
+-            if (!right && !left) {
++            if (spot == null) {
+                 Toast.makeText(launcher, R.string.supericon_no_space, Toast.LENGTH_SHORT).show();
+                 return;
+             }
+-            if (left) {
+-                newX = lp.cellX - 1;
+-            }
++            newX = spot[0];
++            newY = spot[1];
+         }
+ 
+         layout.removeView(old);
+         info.superStyle = newStyle;
+         launcher.getModelWriter().modifyItemInDatabase(info, info.container, info.screenId,
+-                newX, lp.cellY, newSpan, 1);
++                newX, newY, newSpanX, newSpanY);
+         launcher.getModelWriter().updateItemInDatabase(info);
+ 
+         View view = launcher.createShortcut(layout, info);
+diff --git a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android/launcher3/views/SuperIconView.java
+index 8e6b92e..11f19e4 100644
+--- a/src/com/android/launcher3/views/SuperIconView.java
++++ b/src/com/android/launcher3/views/SuperIconView.java
+@@ -18,16 +18,13 @@ package com.android.launcher3.views;
+ import android.content.Context;
+ import android.graphics.Canvas;
+ import android.graphics.Color;
+-import android.graphics.LinearGradient;
+ import android.graphics.Paint;
+-import android.graphics.Path;
+ import android.graphics.Rect;
+ import android.graphics.RectF;
+ import android.graphics.Region;
+-import android.graphics.Shader;
+ import android.graphics.drawable.Drawable;
+-import android.text.TextUtils;
+ import android.text.TextPaint;
++import android.text.TextUtils;
+ import android.util.AttributeSet;
+ import android.util.TypedValue;
+ import android.view.Gravity;
+@@ -38,32 +35,36 @@ import com.android.launcher3.WorkspaceItemInfo;
+ import com.android.launcher3.graphics.IconShape;
+ 
+ /**
+- * A 2x1 app icon ("supericon") on the workspace. The regular label below the icon is not used;
+- * the app name is drawn inside the supericon. The corner radius follows the icon shape.
++ * An app icon that spans several cells ("supericon") on the workspace: 2x1, 3x1 or 2x2. The
++ * regular label below the icon is not used; the app name is drawn inside the supericon.
++ * The corner radius follows the icon shape.
+  *
+- * The icon inside the pill is smaller than a regular workspace icon so that the label gets
+- * enough room. The label may wrap onto two lines and shrinks slightly before it is cut off.
++ * Two styles: a translucent glass pill, and a solid pill tinted with the icon's dominant colour
++ * (the icon sits in a white ring). In the 2x2 size the icon goes in the top-left corner and the
++ * label at the bottom, forming a card.
+  */
+ public class SuperIconView extends DoubleShadowBubbleTextView {
+ 
+     private static IconShape sShape;
+     private static float sCornerRatio = 0.5f;
+ 
+-    /** Icon size inside the pill, relative to the regular workspace icon size. */
++    /** Icon size inside a one-row pill, relative to the regular workspace icon size. */
+     private static final float ICON_SCALE = 0.78f;
+     /** The label never shrinks below this fraction of the regular label size. */
+     private static final float MIN_TEXT_SCALE = 0.78f;
+ 
+     private final Paint mFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+     private final Paint mStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+-    private final Paint mScrimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+     private final RectF mPill = new RectF();
+-    private final Path mClipPath = new Path();
+     private final TextPaint mMeasurePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
++    private final Rect mTmpBounds = new Rect();
++    private final Rect mOldBounds = new Rect();
+     private final float mDensity;
+ 
+-    private int mStyle = WorkspaceItemInfo.SUPER_STYLE_SIDE;
+-    private int mBackdropColor = 0xFF5F5E5A;
++    private boolean mSolid;
++    private boolean mCard;
++    private int mTint = 0xFF5F5E5A;
++    private float mCornerBase;
+     private float mBaseTextSize;
+ 
+     public SuperIconView(Context context) {
+@@ -90,19 +91,20 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+ 
+     @Override
+     public void applyFromWorkspaceItem(WorkspaceItemInfo info, boolean promiseStateChanged) {
+-        int style = info.superStyle;
+-        mStyle = (style < WorkspaceItemInfo.SUPER_STYLE_SIDE
+-                || style > WorkspaceItemInfo.SUPER_STYLE_CARD)
+-                ? WorkspaceItemInfo.SUPER_STYLE_SIDE : style;
++        mSolid = WorkspaceItemInfo.isSolidStyle(info.superStyle);
++        mCard = info.spanY > 1;
+         // Must be set before the icon is applied so the compound drawable gets the right size
+         setIconSize(iconSize());
+         super.applyFromWorkspaceItem(info, promiseStateChanged);
+-        mBackdropColor = info.iconColor != 0 ? (info.iconColor | 0xFF000000) : 0xFF5F5E5A;
++        mTint = info.iconColor != 0 ? (info.iconColor | 0xFF000000) : 0xFF5F5E5A;
+         applyStyle();
+-        updateScrim();
+         invalidate();
+     }
+ 
++    private boolean tintIsLight() {
++        return ColorUtils.calculateLuminance(mTint) > 0.55;
++    }
++
+     private void applyStyle() {
+         setTextSize(TypedValue.COMPLEX_UNIT_PX, mBaseTextSize);
+         // Allow two lines instead of the single (truncated) line of regular workspace labels
+@@ -110,26 +112,27 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         setMinLines(1);
+         setMaxLines(2);
+         setEllipsize(TextUtils.TruncateAt.END);
+-        if (mStyle == WorkspaceItemInfo.SUPER_STYLE_BACKDROP) {
++        if (mSolid) {
++            setTextColor(tintIsLight() ? Color.argb(230, 20, 20, 20) : Color.WHITE);
++        }
++        if (mCard) {
+             setGravity(Gravity.BOTTOM | Gravity.START);
+-            boolean lightBg = ColorUtils.calculateLuminance(mBackdropColor) > 0.6;
+-            setTextColor(lightBg ? Color.argb(230, 20, 20, 20) : Color.WHITE);
+             setCompoundDrawablePadding(0);
+             setCompoundDrawables(null, null, null, null);
+         } else {
+             setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+-            setCompoundDrawablePadding((int) (7 * mDensity));
++            setCompoundDrawablePadding((int) ((mSolid ? 10 : 7) * mDensity));
+         }
+         requestLayout();
+     }
+ 
+-    /** In the backdrop style the icon is drawn by {@link #onDraw}, not as a compound drawable. */
++    /** In the card size the icon is drawn by {@link #onDraw}, not as a compound drawable. */
+     @Override
+     protected void applyCompoundDrawables(Drawable icon) {
+         if (icon == null) {
+             return;
+         }
+-        if (mStyle == WorkspaceItemInfo.SUPER_STYLE_BACKDROP) {
++        if (mCard) {
+             int size = iconSize();
+             icon.setBounds(0, 0, size, size);
+             setCompoundDrawables(null, null, null, null);
+@@ -142,9 +145,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         return ActivityContext.lookupContext(getContext()).getWallpaperDeviceProfile().iconSizePx;
+     }
+ 
+-    /** Icon size inside the pill: smaller than a regular icon, to leave room for the label. */
++    /** Icon size: smaller than a regular icon in a one-row pill, to leave room for the label. */
+     private int iconSize() {
+-        return Math.round(regularIconSize() * ICON_SCALE);
++        return mCard ? regularIconSize() : Math.round(regularIconSize() * ICON_SCALE);
+     }
+ 
+     /** Corner radius as a fraction (0..0.5) of the pill height, from the current icon shape. */
+@@ -173,9 +176,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         return ratio;
+     }
+ 
+-    /** Horizontal space between the pill edge and the icon (side styles). */
+-    private float iconInsetX() {
+-        return 9 * mDensity;
++    /** Space between the pill edge and the icon (the icon's ring in the solid style). */
++    private float iconInset() {
++        return (mCard ? 14 : (mSolid ? 12 : 9)) * mDensity;
+     }
+ 
+     @Override
+@@ -185,24 +188,23 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         if (w > 0 && h > 0) {
+             int size = iconSize();
+             float sideInset = 3 * mDensity;
+-            float pillH = Math.min(h, regularIconSize() + 14 * mDensity);
+-            float top = (h - pillH) / 2f;
+-            mPill.set(sideInset, top, w - sideInset, top + pillH);
+-            int padStart;
++            int rows = mCard ? 2 : 1;
++            float rowH = h / (float) rows;
++            mCornerBase = Math.min(rowH, regularIconSize() + 14 * mDensity);
++            float vInset = (rowH - mCornerBase) / 2f;
++            mPill.set(sideInset, vInset, w - sideInset, h - vInset);
++            int padStart = (int) (mPill.left + iconInset());
+             int padEnd = (int) (11 * mDensity);
+             float textAvail;
+-            if (mStyle == WorkspaceItemInfo.SUPER_STYLE_BACKDROP) {
+-                padStart = (int) (mPill.left + 12 * mDensity);
+-                int padBottom = (int) (h - mPill.bottom + 9 * mDensity);
++            if (mCard) {
++                int padBottom = (int) (h - mPill.bottom + 12 * mDensity);
+                 setPaddingRelative(padStart, 0, padEnd, padBottom);
+                 textAvail = w - padStart - padEnd;
+             } else {
+-                padStart = (int) (mPill.left + iconInsetX());
+                 setPaddingRelative(padStart, 0, padEnd, 0);
+                 textAvail = w - padStart - padEnd - size - getCompoundDrawablePadding();
+             }
+             fitText(textAvail);
+-            updateScrim();
+         }
+         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+     }
+@@ -238,74 +240,50 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+         }
+     }
+ 
+-    /** Horizontal scrim that keeps the label readable on top of the faded backdrop icon. */
+-    private void updateScrim() {
+-        if (mStyle != WorkspaceItemInfo.SUPER_STYLE_BACKDROP || mPill.width() <= 0) {
+-            mScrimPaint.setShader(null);
+-            return;
+-        }
+-        int solid = ColorUtils.setAlphaComponent(mBackdropColor, 235);
+-        int clear = ColorUtils.setAlphaComponent(mBackdropColor, 0);
+-        mScrimPaint.setShader(new LinearGradient(mPill.left, 0, mPill.right, 0,
+-                new int[] {solid, solid, clear},
+-                new float[] {0f, 0.45f, 1f},
+-                Shader.TileMode.CLAMP));
+-    }
+-
+     @Override
+     public void getIconBounds(Rect outBounds) {
+         int size = iconSize();
+-        float capY = (mPill.height() - size) / 2f;
+-        int left = mStyle == WorkspaceItemInfo.SUPER_STYLE_BACKDROP
+-                ? (int) (mPill.right - size - capY)
+-                : (int) (mPill.left + iconInsetX());
+-        int top = (int) (mPill.top + capY);
++        int left = (int) (mPill.left + iconInset());
++        int top = mCard
++                ? (int) (mPill.top + iconInset())
++                : (int) (mPill.top + (mPill.height() - size) / 2f);
+         outBounds.set(left, top, left + size, top + size);
+     }
+ 
+     @Override
+     public void onDraw(Canvas canvas) {
+         if (mPill.width() > 0) {
+-            float r = cornerRatio() * mPill.height();
+-            if (mStyle == WorkspaceItemInfo.SUPER_STYLE_BACKDROP) {
+-                drawBackdrop(canvas, r);
++            float r = Math.min(cornerRatio() * mCornerBase,
++                    Math.min(mPill.width(), mPill.height()) / 2f);
++            if (mSolid) {
++                mFillPaint.setColor(mTint);
++                canvas.drawRoundRect(mPill, r, r, mFillPaint);
++                getIconBounds(mTmpBounds);
++                mFillPaint.setColor(Color.argb(235, 255, 255, 255));
++                canvas.drawCircle(mTmpBounds.exactCenterX(), mTmpBounds.exactCenterY(),
++                        mTmpBounds.width() / 2f + 3 * mDensity, mFillPaint);
+             } else {
+                 mFillPaint.setColor(Color.argb(64, 255, 255, 255));
+                 canvas.drawRoundRect(mPill, r, r, mFillPaint);
+                 mStrokePaint.setColor(Color.argb(80, 255, 255, 255));
+                 canvas.drawRoundRect(mPill, r, r, mStrokePaint);
+             }
++            if (mCard) {
++                drawCardIcon(canvas);
++            }
+         }
+         super.onDraw(canvas);
+     }
+ 
+-    private void drawBackdrop(Canvas canvas, float r) {
+-        mFillPaint.setColor(mBackdropColor);
+-        canvas.drawRoundRect(mPill, r, r, mFillPaint);
+-
++    private void drawCardIcon(Canvas canvas) {
+         Drawable icon = getIcon();
+         if (icon == null) {
+             return;
+         }
+-        mClipPath.reset();
+-        mClipPath.addRoundRect(mPill, r, r, Path.Direction.CW);
+-        // Softer and smaller than before: a large artwork that still shows the app's own
+-        // text made the card look cluttered.
+-        int size = (int) (mPill.height() * 1.25f);
+-        int left = (int) (mPill.right - size * 0.9f);
+-        int top = (int) (mPill.top + (mPill.height() - size) / 2f);
+-
+-        Rect oldBounds = new Rect(icon.getBounds());
+-        canvas.save();
+-        canvas.clipPath(mClipPath);
+-        icon.setBounds(left, top, left + size, top + size);
+-        icon.setAlpha(70);
++        getIconBounds(mTmpBounds);
++        mOldBounds.set(icon.getBounds());
++        icon.setBounds(mTmpBounds);
+         icon.draw(canvas);
+-        icon.setAlpha(255);
+-        icon.setBounds(oldBounds);
+-        if (mScrimPaint.getShader() != null) {
+-            canvas.drawRect(mPill, mScrimPaint);
+-        }
+-        canvas.restore();
++        icon.setBounds(mOldBounds);
+     }
+ }
