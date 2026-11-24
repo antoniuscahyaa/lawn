@@ -288,7 +288,7 @@ diff -ruN a/src/com/android/launcher3/popup/SuperIconMenu.java b/src/com/android
 diff -ruN a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android/launcher3/views/SuperIconView.java
 --- a/src/com/android/launcher3/views/SuperIconView.java	1970-01-01 00:00:00.000000000 +0000
 +++ b/src/com/android/launcher3/views/SuperIconView.java	2026-11-23 04:26:50.557841743 +0000
-@@ -0,0 +1,221 @@
+@@ -0,0 +1,311 @@
 +/*
 + * Copyright (C) 2026 The Android Open Source Project
 + *
@@ -309,12 +309,16 @@ diff -ruN a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android
 +import android.content.Context;
 +import android.graphics.Canvas;
 +import android.graphics.Color;
++import android.graphics.LinearGradient;
 +import android.graphics.Paint;
 +import android.graphics.Path;
 +import android.graphics.Rect;
 +import android.graphics.RectF;
 +import android.graphics.Region;
++import android.graphics.Shader;
 +import android.graphics.drawable.Drawable;
++import android.text.TextUtils;
++import android.text.TextPaint;
 +import android.util.AttributeSet;
 +import android.util.TypedValue;
 +import android.view.Gravity;
@@ -327,16 +331,26 @@ diff -ruN a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android
 +/**
 + * A 2x1 app icon ("supericon") on the workspace. The regular label below the icon is not used;
 + * the app name is drawn inside the supericon. The corner radius follows the icon shape.
++ *
++ * The icon inside the pill is smaller than a regular workspace icon so that the label gets
++ * enough room. The label may wrap onto two lines and shrinks slightly before it is cut off.
 + */
 +public class SuperIconView extends DoubleShadowBubbleTextView {
 +
 +    private static IconShape sShape;
 +    private static float sCornerRatio = 0.5f;
 +
++    /** Icon size inside the pill, relative to the regular workspace icon size. */
++    private static final float ICON_SCALE = 0.78f;
++    /** The label never shrinks below this fraction of the regular label size. */
++    private static final float MIN_TEXT_SCALE = 0.78f;
++
 +    private final Paint mFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 +    private final Paint mStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
++    private final Paint mScrimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 +    private final RectF mPill = new RectF();
 +    private final Path mClipPath = new Path();
++    private final TextPaint mMeasurePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
 +    private final float mDensity;
 +
 +    private int mStyle = WorkspaceItemInfo.SUPER_STYLE_SIDE;
@@ -371,21 +385,31 @@ diff -ruN a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android
 +        mStyle = (style < WorkspaceItemInfo.SUPER_STYLE_SIDE
 +                || style > WorkspaceItemInfo.SUPER_STYLE_CARD)
 +                ? WorkspaceItemInfo.SUPER_STYLE_SIDE : style;
++        // Must be set before the icon is applied so the compound drawable gets the right size
++        setIconSize(iconSize());
 +        super.applyFromWorkspaceItem(info, promiseStateChanged);
 +        mBackdropColor = info.iconColor != 0 ? (info.iconColor | 0xFF000000) : 0xFF5F5E5A;
 +        applyStyle();
++        updateScrim();
 +        invalidate();
 +    }
 +
 +    private void applyStyle() {
-+        setTextSize(TypedValue.COMPLEX_UNIT_PX, mBaseTextSize * 1.1f);
++        setTextSize(TypedValue.COMPLEX_UNIT_PX, mBaseTextSize);
++        // Allow two lines instead of the single (truncated) line of regular workspace labels
++        setSingleLine(false);
++        setMinLines(1);
++        setMaxLines(2);
++        setEllipsize(TextUtils.TruncateAt.END);
 +        if (mStyle == WorkspaceItemInfo.SUPER_STYLE_BACKDROP) {
 +            setGravity(Gravity.BOTTOM | Gravity.START);
 +            boolean lightBg = ColorUtils.calculateLuminance(mBackdropColor) > 0.6;
 +            setTextColor(lightBg ? Color.argb(230, 20, 20, 20) : Color.WHITE);
++            setCompoundDrawablePadding(0);
 +            setCompoundDrawables(null, null, null, null);
 +        } else {
 +            setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
++            setCompoundDrawablePadding((int) (7 * mDensity));
 +        }
 +        requestLayout();
 +    }
@@ -405,8 +429,13 @@ diff -ruN a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android
 +        }
 +    }
 +
-+    private int iconSize() {
++    private int regularIconSize() {
 +        return ActivityContext.lookupContext(getContext()).getWallpaperDeviceProfile().iconSizePx;
++    }
++
++    /** Icon size inside the pill: smaller than a regular icon, to leave room for the label. */
++    private int iconSize() {
++        return Math.round(regularIconSize() * ICON_SCALE);
 +    }
 +
 +    /** Corner radius as a fraction (0..0.5) of the pill height, from the current icon shape. */
@@ -435,6 +464,11 @@ diff -ruN a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android
 +        return ratio;
 +    }
 +
++    /** Horizontal space between the pill edge and the icon (side styles). */
++    private float iconInsetX() {
++        return 9 * mDensity;
++    }
++
 +    @Override
 +    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
 +        int w = MeasureSpec.getSize(widthMeasureSpec);
@@ -442,30 +476,81 @@ diff -ruN a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android
 +        if (w > 0 && h > 0) {
 +            int size = iconSize();
 +            float sideInset = 3 * mDensity;
-+            float pillH = Math.min(h, size + 14 * mDensity);
++            float pillH = Math.min(h, regularIconSize() + 14 * mDensity);
 +            float top = (h - pillH) / 2f;
 +            mPill.set(sideInset, top, w - sideInset, top + pillH);
-+            int cap = (int) ((pillH - size) / 2f);
++            int padStart;
++            int padEnd = (int) (11 * mDensity);
++            float textAvail;
 +            if (mStyle == WorkspaceItemInfo.SUPER_STYLE_BACKDROP) {
-+                int padStart = (int) (mPill.left + 12 * mDensity);
++                padStart = (int) (mPill.left + 12 * mDensity);
 +                int padBottom = (int) (h - mPill.bottom + 9 * mDensity);
-+                setPaddingRelative(padStart, 0, (int) (pillH * 0.9f), padBottom);
++                setPaddingRelative(padStart, 0, padEnd, padBottom);
++                textAvail = w - padStart - padEnd;
 +            } else {
-+                int padStart = (int) mPill.left + cap;
-+                setPaddingRelative(padStart, 0, (int) (pillH * 0.5f), 0);
++                padStart = (int) (mPill.left + iconInsetX());
++                setPaddingRelative(padStart, 0, padEnd, 0);
++                textAvail = w - padStart - padEnd - size - getCompoundDrawablePadding();
 +            }
++            fitText(textAvail);
++            updateScrim();
 +        }
 +        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
++    }
++
++    /**
++     * Shrinks the label a little (down to {@link #MIN_TEXT_SCALE}) until its longest word fits
++     * the available width, so short names are not cut off. Longer text wraps onto a second line.
++     */
++    private void fitText(float available) {
++        CharSequence text = getText();
++        if (text == null || text.length() == 0 || available <= 0) {
++            return;
++        }
++        float minSize = mBaseTextSize * MIN_TEXT_SCALE;
++        float size = mBaseTextSize;
++        mMeasurePaint.set(getPaint());
++        mMeasurePaint.setTypeface(getPaint().getTypeface());
++        String[] words = text.toString().split("\\s+");
++        while (size > minSize) {
++            mMeasurePaint.setTextSize(size);
++            float widest = 0;
++            for (String word : words) {
++                widest = Math.max(widest, mMeasurePaint.measureText(word));
++            }
++            if (widest <= available) {
++                break;
++            }
++            size -= 0.5f * mDensity;
++        }
++        size = Math.max(size, minSize);
++        if (Math.abs(getTextSize() - size) > 0.01f) {
++            setTextSize(TypedValue.COMPLEX_UNIT_PX, size);
++        }
++    }
++
++    /** Horizontal scrim that keeps the label readable on top of the faded backdrop icon. */
++    private void updateScrim() {
++        if (mStyle != WorkspaceItemInfo.SUPER_STYLE_BACKDROP || mPill.width() <= 0) {
++            mScrimPaint.setShader(null);
++            return;
++        }
++        int solid = ColorUtils.setAlphaComponent(mBackdropColor, 235);
++        int clear = ColorUtils.setAlphaComponent(mBackdropColor, 0);
++        mScrimPaint.setShader(new LinearGradient(mPill.left, 0, mPill.right, 0,
++                new int[] {solid, solid, clear},
++                new float[] {0f, 0.45f, 1f},
++                Shader.TileMode.CLAMP));
 +    }
 +
 +    @Override
 +    public void getIconBounds(Rect outBounds) {
 +        int size = iconSize();
-+        float cap = (mPill.height() - size) / 2f;
++        float capY = (mPill.height() - size) / 2f;
 +        int left = mStyle == WorkspaceItemInfo.SUPER_STYLE_BACKDROP
-+                ? (int) (mPill.right - size - cap)
-+                : (int) (mPill.left + cap);
-+        int top = (int) (mPill.top + cap);
++                ? (int) (mPill.right - size - capY)
++                : (int) (mPill.left + iconInsetX());
++        int top = (int) (mPill.top + capY);
 +        outBounds.set(left, top, left + size, top + size);
 +    }
 +
@@ -495,18 +580,23 @@ diff -ruN a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android
 +        }
 +        mClipPath.reset();
 +        mClipPath.addRoundRect(mPill, r, r, Path.Direction.CW);
-+        int size = (int) (mPill.height() * 1.7f);
-+        int left = (int) (mPill.right - size * 0.78f);
++        // Softer and smaller than before: a large artwork that still shows the app's own
++        // text made the card look cluttered.
++        int size = (int) (mPill.height() * 1.25f);
++        int left = (int) (mPill.right - size * 0.9f);
 +        int top = (int) (mPill.top + (mPill.height() - size) / 2f);
 +
 +        Rect oldBounds = new Rect(icon.getBounds());
 +        canvas.save();
 +        canvas.clipPath(mClipPath);
 +        icon.setBounds(left, top, left + size, top + size);
-+        icon.setAlpha(110);
++        icon.setAlpha(70);
 +        icon.draw(canvas);
 +        icon.setAlpha(255);
 +        icon.setBounds(oldBounds);
++        if (mScrimPaint.getShader() != null) {
++            canvas.drawRect(mPill, mScrimPaint);
++        }
 +        canvas.restore();
 +    }
 +}
