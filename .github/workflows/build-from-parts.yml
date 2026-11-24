@@ -123,6 +123,14 @@ jobs:
             echo "ios-supericon-v2.patch tidak ada di repo, dilewati"
           fi
 
+      - name: Terapkan patch supericon v3 (gambar latar, warna dan letak label) (opsional)
+        run: |
+          if [ -f ios-supericon-v3.patch ] && [ -f ios-supericon-v2.patch ]; then
+            patch -p1 -d src < ios-supericon-v3.patch
+          else
+            echo "ios-supericon-v3.patch (atau v2) tidak ada di repo, dilewati"
+          fi
+
       - name: Atur varian ci (paket ch.deletescape.lawnchair.ci)
         working-directory: src
         run: |
