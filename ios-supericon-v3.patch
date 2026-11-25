@@ -21,6 +21,53 @@ index 3e34e42..254728e 100644
          <activity
              android:excludeFromRecents="true"
              android:name="ch.deletescape.lawnchair.LawnchairLauncher$Screenshot"
+diff --git a/lawnchair/src/ch/deletescape/lawnchair/popup/LawnchairShortcut.kt b/lawnchair/src/ch/deletescape/lawnchair/popup/LawnchairShortcut.kt
+index 2a6fb73..da67904 100644
+--- a/lawnchair/src/ch/deletescape/lawnchair/popup/LawnchairShortcut.kt
++++ b/lawnchair/src/ch/deletescape/lawnchair/popup/LawnchairShortcut.kt
+@@ -58,7 +58,7 @@ class LawnchairShortcut(private val context: Context) {
+ 
+     val enabledShortcuts get() = shortcuts.filter { it.enabled }.map { it.shortcut }
+ 
+-    class SuperIcon : SystemShortcut<Launcher>(R.drawable.ic_widget, R.string.supericon_menu) {
++    class SuperIcon : SystemShortcut<Launcher>(R.drawable.ic_supericon, R.string.supericon_menu) {
+ 
+         override fun getOnClickListener(launcher: Launcher, itemInfo: ItemInfo): View.OnClickListener? {
+             if (launcher.lawnchairPrefs.lockDesktop) return null
+diff --git a/res/drawable/ic_supericon.xml b/res/drawable/ic_supericon.xml
+new file mode 100644
+index 0000000..6166402
+--- /dev/null
++++ b/res/drawable/ic_supericon.xml
+@@ -0,0 +1,28 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++Copyright (C) 2026 The Android Open Source Project
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++        http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
++-->
++<!-- A wide pill with a dot on the left: a supericon -->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++        android:width="@dimen/options_menu_icon_size"
++        android:height="@dimen/options_menu_icon_size"
++        android:viewportWidth="24.0"
++        android:viewportHeight="24.0"
++        android:tint="?android:attr/textColorPrimary">
++    <path
++        android:fillColor="@android:color/white"
++        android:fillType="evenOdd"
++        android:pathData="M7,6 h10 a6,6 0 0 1 0,12 H7 a6,6 0 0 1 0,-12 z M7,8 h10 a4,4 0 0 1 0,8 H7 a4,4 0 0 1 0,-8 z M8,10 a2,2 0 1 0 0,4 a2,2 0 1 0 0,-4 z"/>
++</vector>
 diff --git a/res/values/supericon_strings.xml b/res/values/supericon_strings.xml
 index 35aa42d..607f72a 100644
 --- a/res/values/supericon_strings.xml
@@ -89,7 +136,7 @@ index 88b8fc1..0205b04 100644
      }
  
 diff --git a/src/com/android/launcher3/popup/SuperIconMenu.java b/src/com/android/launcher3/popup/SuperIconMenu.java
-index 242a23e..e8e4e30 100644
+index 242a23e..eef59ae 100644
 --- a/src/com/android/launcher3/popup/SuperIconMenu.java
 +++ b/src/com/android/launcher3/popup/SuperIconMenu.java
 @@ -15,6 +15,8 @@
@@ -149,8 +196,9 @@ index 242a23e..e8e4e30 100644
 -
          ArrayList<OptionItem> items = new ArrayList<>();
 -        if (isSuper) {
+-            items.add(new OptionItem(R.string.supericon_size_normal, R.drawable.ic_widget, 0,
 +        if (!info.isSuperIcon()) {
-+            items.add(new OptionItem(R.string.supericon_make, R.drawable.ic_widget, 0, v -> {
++            items.add(new OptionItem(R.string.supericon_make, R.drawable.ic_supericon, 0, v -> {
 +                String error = tryApply(launcher, info, WorkspaceItemInfo.SUPER_STYLE_SOLID, 2, 1);
 +                if (error != null) {
 +                    Toast.makeText(launcher, error, Toast.LENGTH_SHORT).show();
@@ -159,13 +207,13 @@ index 242a23e..e8e4e30 100644
 +            }));
 +        } else {
 +            if (icon instanceof SuperIconView) {
-+                items.add(new OptionItem(R.string.supericon_customize, R.drawable.ic_widget, 0,
++                items.add(new OptionItem(R.string.supericon_customize, R.drawable.ic_supericon, 0,
 +                        v -> {
 +                            customize(launcher, info, (SuperIconView) icon);
 +                            return true;
 +                        }));
 +            }
-             items.add(new OptionItem(R.string.supericon_size_normal, R.drawable.ic_widget, 0,
++            items.add(new OptionItem(R.string.supericon_size_normal, R.drawable.ic_supericon, 0,
                      v -> {
 -                        apply(launcher, info, WorkspaceItemInfo.SUPER_NONE, 1, 1);
 +                        String error = tryApply(launcher, info, WorkspaceItemInfo.SUPER_NONE,
@@ -175,7 +223,7 @@ index 242a23e..e8e4e30 100644
 +                        }
                          return true;
                      }));
-+            items.add(new OptionItem(R.string.supericon_backup, R.drawable.ic_widget, 0, v -> {
++            items.add(new OptionItem(R.string.supericon_backup, R.drawable.ic_supericon, 0, v -> {
 +                launcher.startActivity(new Intent(launcher, SuperIconBackupActivity.class));
 +                return true;
 +            }));
@@ -589,10 +637,10 @@ index 0000000..fa81125
 +}
 diff --git a/src/com/android/launcher3/supericon/SuperIconEditActivity.java b/src/com/android/launcher3/supericon/SuperIconEditActivity.java
 new file mode 100644
-index 0000000..40df4fc
+index 0000000..142c994
 --- /dev/null
 +++ b/src/com/android/launcher3/supericon/SuperIconEditActivity.java
-@@ -0,0 +1,1061 @@
+@@ -0,0 +1,1169 @@
 +/*
 + * Copyright (C) 2026 The Android Open Source Project
 + *
@@ -611,8 +659,11 @@ index 0000000..40df4fc
 +package com.android.launcher3.supericon;
 +
 +import android.app.Activity;
++import android.app.AlertDialog;
 +import android.content.ComponentName;
 +import android.content.Context;
++import android.content.pm.LauncherActivityInfo;
++import android.content.pm.LauncherApps;
 +import android.content.pm.ShortcutInfo;
 +import android.content.Intent;
 +import android.graphics.Bitmap;
@@ -656,6 +707,7 @@ index 0000000..40df4fc
 +
 +import java.io.File;
 +import java.util.ArrayList;
++import java.util.Collections;
 +import java.util.List;
 +
 +/**
@@ -705,7 +757,9 @@ index 0000000..40df4fc
 +    private SeekBar mZoom, mPanX, mPanY, mDim, mLabelSize;
 +    private CheckBox mShowIcon, mShowLabel, mShowChips, mRing, mShine, mShowDot, mPopupExtras;
 +    private SeekBar mIconScale, mGlassAlpha;
-+    private RadioGroup mSubGroup;
++    private RadioGroup mSubGroup, mUpGroup, mDownGroup;
++    private Button mUpApp, mDownApp;
++    private CheckBox mIconBg;
 +    private EditText mSubText;
 +    private LinearLayout mShortcutBox;
 +    private final List<String> mShortcutIds = new ArrayList<>();
@@ -865,6 +919,8 @@ index 0000000..40df4fc
 +            mPreview.invalidate();
 +        }), weight());
 +        root.addView(imgButtons);
++        mIconBg = check(root, "Pakai ikon aplikasi sebagai latar (buram), bila tanpa gambar",
++                c -> mSettings.iconBackground = c);
 +        mZoom = seek(root, "Perbesar / perkecil (%)", 30, 300, v -> {
 +            mSettings.imageZoom = v / 100f;
 +            mPreview.invalidate();
@@ -981,6 +1037,40 @@ index 0000000..40df4fc
 +        subNote.setTextSize(12);
 +        root.addView(subNote);
 +
++        // ---- swipe gestures
++        root.addView(section("Gestur geser"));
++        String[] gestureNames = {"Tidak ada", "Pintasan pertama", "Aplikasi"};
++        TextView upLabel = new TextView(this);
++        upLabel.setText("Geser ke atas");
++        root.addView(upLabel);
++        mUpGroup = radios(gestureNames, true, i -> {
++            mSettings.swipeUp = i;
++            refreshGestureButtons();
++        });
++        HorizontalScrollView upScroll = new HorizontalScrollView(this);
++        upScroll.addView(mUpGroup);
++        root.addView(upScroll);
++        mUpApp = button("Pilih aplikasi…", v -> pickApp(true));
++        root.addView(mUpApp);
++        TextView downLabel = new TextView(this);
++        downLabel.setText("Geser ke bawah");
++        root.addView(downLabel);
++        mDownGroup = radios(gestureNames, true, i -> {
++            mSettings.swipeDown = i;
++            refreshGestureButtons();
++        });
++        HorizontalScrollView downScroll = new HorizontalScrollView(this);
++        downScroll.addView(mDownGroup);
++        root.addView(downScroll);
++        mDownApp = button("Pilih aplikasi…", v -> pickApp(false));
++        root.addView(mDownApp);
++        TextView gestureNote = new TextView(this);
++        gestureNote.setText("Geser harus dimulai di atas supericon dan cukup lurus ke atas "
++                + "atau bawah. Kalau launcher lebih dulu menangkap geseran (membuka daftar "
++                + "aplikasi), pelan-pelan saja di awal.");
++        gestureNote.setTextSize(12);
++        root.addView(gestureNote);
++
 +        // ---- shortcuts
 +        root.addView(section("Pintasan aplikasi yang tampil"));
 +        mShortcutBox = new LinearLayout(this);
@@ -1094,6 +1184,52 @@ index 0000000..40df4fc
 +                mSettings.chipIds.add(mShortcutIds.get(i));
 +            }
 +        }
++    }
++
++    private String appLabel(String flat) {
++        ComponentName cn = flat == null || flat.isEmpty()
++                ? null : ComponentName.unflattenFromString(flat);
++        if (cn == null) {
++            return "Pilih aplikasi…";
++        }
++        try {
++            return "Aplikasi: " + getPackageManager().getActivityInfo(cn, 0)
++                    .loadLabel(getPackageManager());
++        } catch (Exception e) {
++            return "Aplikasi: " + cn.getPackageName();
++        }
++    }
++
++    private void refreshGestureButtons() {
++        mUpApp.setText(appLabel(mSettings.swipeUpApp));
++        mUpApp.setEnabled(mSettings.swipeUp == SuperIconSettings.GESTURE_APP);
++        mDownApp.setText(appLabel(mSettings.swipeDownApp));
++        mDownApp.setEnabled(mSettings.swipeDown == SuperIconSettings.GESTURE_APP);
++    }
++
++    /** Lets the user choose which app a swipe starts. */
++    private void pickApp(final boolean up) {
++        LauncherApps apps = (LauncherApps) getSystemService(Context.LAUNCHER_APPS_SERVICE);
++        final List<LauncherActivityInfo> list = new ArrayList<>(
++                apps.getActivityList(null, android.os.Process.myUserHandle()));
++        Collections.sort(list, (a, b) -> a.getLabel().toString()
++                .compareToIgnoreCase(b.getLabel().toString()));
++        CharSequence[] labels = new CharSequence[list.size()];
++        for (int i = 0; i < labels.length; i++) {
++            labels[i] = list.get(i).getLabel();
++        }
++        new AlertDialog.Builder(this)
++                .setTitle("Pilih aplikasi")
++                .setItems(labels, (dialog, which) -> {
++                    String flat = list.get(which).getComponentName().flattenToString();
++                    if (up) {
++                        mSettings.swipeUpApp = flat;
++                    } else {
++                        mSettings.swipeDownApp = flat;
++                    }
++                    refreshGestureButtons();
++                })
++                .show();
 +    }
 +
 +    /** Sets the image sliders from the settings (after a gesture on the preview). */
@@ -1313,6 +1449,9 @@ index 0000000..40df4fc
 +        mShowIcon.setChecked(mSettings.showIcon);
 +        mShowLabel.setChecked(mSettings.showLabel);
 +        mShowChips.setChecked(mSettings.showChips);
++        mIconBg.setChecked(mSettings.iconBackground);
++        checkIndex(mUpGroup, mSettings.swipeUp);
++        checkIndex(mDownGroup, mSettings.swipeDown);
 +        mShowDot.setChecked(mSettings.showDot);
 +        mPopupExtras.setChecked(mSettings.popupExtras);
 +        setSeek(mGlassAlpha, mSettings.glassAlpha);
@@ -1326,6 +1465,7 @@ index 0000000..40df4fc
 +            mShortcutChecks.get(i).setChecked(mSettings.chipIds.contains(mShortcutIds.get(i)));
 +        }
 +        mSyncing = false;
++        refreshGestureButtons();
 +        refreshSwatches();
 +        refreshGrid();
 +        mPreview.settings = mSettings;
@@ -1476,6 +1616,7 @@ index 0000000..40df4fc
 +        SuperIconSettings settings;
 +        Bitmap image;
 +        Bitmap icon;
++        Bitmap iconBlur;
 +        String label = "";
 +        boolean solidStyle;
 +        int sx = 2;
@@ -1520,7 +1661,8 @@ index 0000000..40df4fc
 +        /** Drag to pan and pinch to zoom the background image. */
 +        @Override
 +        public boolean onTouchEvent(MotionEvent e) {
-+            if (image == null || settings == null) {
++            final Bitmap img = currentImage();
++            if (img == null || settings == null) {
 +                return super.onTouchEvent(e);
 +            }
 +            getParent().requestDisallowInterceptTouchEvent(true);
@@ -1539,8 +1681,8 @@ index 0000000..40df4fc
 +                float dy = e.getY() - lastY;
 +                lastX = e.getX();
 +                lastY = e.getY();
-+                float bw = image.getWidth();
-+                float bh = image.getHeight();
++                float bw = img.getWidth();
++                float bh = img.getHeight();
 +                float scale = Math.max(lay.pill.width() / bw, lay.pill.height() / bh)
 +                        * settings.imageZoom;
 +                float rangeX = Math.abs(bw * scale - lay.pill.width()) / 2f;
@@ -1559,6 +1701,20 @@ index 0000000..40df4fc
 +                }
 +            }
 +            return true;
++        }
++
++        /** The imported image or, if there is none and it is wanted, the softened icon. */
++        Bitmap currentImage() {
++            if (image != null) {
++                return image;
++            }
++            if (settings != null && settings.iconBackground && icon != null) {
++                if (iconBlur == null) {
++                    iconBlur = SuperIconSettings.blurredIcon(icon);
++                }
++                return iconBlur;
++            }
++            return null;
 +        }
 +
 +        int chipCount() {
@@ -1591,11 +1747,11 @@ index 0000000..40df4fc
 +            int fillColor = settings.fillColor(solidStyle, tint);
 +            lay.compute(vw, vh, sx, sy, fillColor != 0, settings.showIcon, regular, d, ratio,
 +                    chips, settings.iconScale);
-+            lay.drawBackground(canvas, fillColor, image, settings, fill, stroke, d);
++            lay.drawBackground(canvas, fillColor, currentImage(), settings, fill, stroke, d);
 +            if (settings.showIcon && icon != null) {
 +                canvas.drawBitmap(icon, null, lay.icon, null);
 +            }
-+            int labelColor = settings.resolveLabelColor(fillColor, image != null, defColor);
++            int labelColor = settings.resolveLabelColor(fillColor, currentImage() != null, defColor);
 +
 +            // Placeholders where the app's shortcuts go
 +            for (int i = 0; i < lay.chipCountFit; i++) {
@@ -1869,10 +2025,10 @@ index 0000000..04e66f5
 +}
 diff --git a/src/com/android/launcher3/supericon/SuperIconSettings.java b/src/com/android/launcher3/supericon/SuperIconSettings.java
 new file mode 100644
-index 0000000..1372ada
+index 0000000..b636f93
 --- /dev/null
 +++ b/src/com/android/launcher3/supericon/SuperIconSettings.java
-@@ -0,0 +1,556 @@
+@@ -0,0 +1,602 @@
 +/*
 + * Copyright (C) 2026 The Android Open Source Project
 + *
@@ -1943,6 +2099,10 @@ index 0000000..1372ada
 +    public static final int SUB_COUNT = 2;
 +    public static final int SUB_LAST = 3;
 +
++    public static final int GESTURE_NONE = 0;
++    public static final int GESTURE_SHORTCUT = 1;
++    public static final int GESTURE_APP = 2;
++
 +    public static final float MIN_ZOOM = 0.3f;
 +    public static final float MAX_ZOOM = 3f;
 +
@@ -1968,6 +2128,15 @@ index 0000000..1372ada
 +    public boolean showIcon = true;
 +    public boolean showLabel = true;
 +    public boolean showChips = true;
++    /** Background made from the app's own icon, enlarged and softened (used when there is no
++     *  imported image). */
++    public boolean iconBackground = false;
++    /** What swiping up or down on the supericon does: nothing, the app's first shortcut (or the
++     *  first of the chosen ones), or another app (a flattened component name). */
++    public int swipeUp = GESTURE_NONE;
++    public String swipeUpApp = "";
++    public int swipeDown = GESTURE_NONE;
++    public String swipeDownApp = "";
 +    /** Whether the icon shows its notification dot. */
 +    public boolean showDot = true;
 +    /** Whether the long-press menu lists the app's shortcuts and notifications. */
@@ -2075,6 +2244,29 @@ index 0000000..1372ada
 +        return b;
 +    }
 +
++    /**
++     * A soft version of the app icon to use as a background: its middle part, shrunk a lot so
++     * that drawing it enlarged blurs it. Returns null if that is not possible.
++     */
++    public static Bitmap blurredIcon(Bitmap icon) {
++        if (icon == null) {
++            return null;
++        }
++        try {
++            int w = icon.getWidth();
++            int h = icon.getHeight();
++            if (w < 8 || h < 8) {
++                return icon;
++            }
++            Bitmap crop = Bitmap.createBitmap(icon, w * 15 / 100, h * 15 / 100,
++                    w * 70 / 100, h * 70 / 100);
++            return Bitmap.createScaledBitmap(crop, Math.max(2, crop.getWidth() / 10),
++                    Math.max(2, crop.getHeight() / 10), true);
++        } catch (RuntimeException e) {
++            return null;
++        }
++    }
++
 +    // ------------------------------------------------------------ style clipboard
 +
 +    /** A copied style: the settings, the style, and optionally the background image. */
@@ -2150,6 +2342,11 @@ index 0000000..1372ada
 +        o.put("icon", showIcon);
 +        o.put("label", showLabel);
 +        o.put("chips", showChips);
++        o.put("iconBg", iconBackground);
++        o.put("swUp", swipeUp);
++        o.put("swUpApp", swipeUpApp);
++        o.put("swDown", swipeDown);
++        o.put("swDownApp", swipeDownApp);
 +        o.put("dot", showDot);
 +        o.put("popup", popupExtras);
 +        o.put("chipIds", new JSONArray(chipIds));
@@ -2177,6 +2374,11 @@ index 0000000..1372ada
 +        s.showIcon = o.optBoolean("icon", true);
 +        s.showLabel = o.optBoolean("label", true);
 +        s.showChips = o.optBoolean("chips", true);
++        s.iconBackground = o.optBoolean("iconBg", false);
++        s.swipeUp = Math.max(0, Math.min(2, o.optInt("swUp", 0)));
++        s.swipeUpApp = o.optString("swUpApp", "");
++        s.swipeDown = Math.max(0, Math.min(2, o.optInt("swDown", 0)));
++        s.swipeDownApp = o.optString("swDownApp", "");
 +        s.showDot = o.optBoolean("dot", true);
 +        s.popupExtras = o.optBoolean("popup", true);
 +        JSONArray ids = o.optJSONArray("chipIds");
@@ -2430,10 +2632,10 @@ index 0000000..1372ada
 +    }
 +}
 diff --git a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android/launcher3/views/SuperIconView.java
-index 11f19e4..d96d5fb 100644
+index 11f19e4..264fe08 100644
 --- a/src/com/android/launcher3/views/SuperIconView.java
 +++ b/src/com/android/launcher3/views/SuperIconView.java
-@@ -15,57 +15,110 @@
+@@ -15,57 +15,114 @@
   */
  package com.android.launcher3.views;
  
@@ -2556,12 +2758,16 @@ index 11f19e4..d96d5fb 100644
 -    private float mCornerBase;
      private float mBaseTextSize;
 +    private int mLoadToken;
++    private float mGestureX;
++    private float mGestureY;
++    /** 0: undecided, 1: a vertical swipe we handle, -1: not a swipe. */
++    private int mGestureState;
 +    private int mDownChip = -1;
 +    private int mPendingChip = -1;
  
      public SuperIconView(Context context) {
          this(context, null);
-@@ -81,77 +134,377 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -81,77 +138,470 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          mStrokePaint.setStyle(Paint.Style.STROKE);
          mStrokePaint.setStrokeWidth(mDensity);
          mBaseTextSize = getTextSize();
@@ -2611,6 +2817,9 @@ index 11f19e4..d96d5fb 100644
 +    private void loadSettings() {
 +        mSettings = SuperIconSettings.load(getContext(), mItemId);
 +        mImage = SuperIconSettings.loadImage(getContext(), mItemId);
++        if (mImage == null && mSettings.iconBackground && mInfo != null) {
++            mImage = SuperIconSettings.blurredIcon(mInfo.iconBitmap);
++        }
      }
  
      @Override
@@ -2780,8 +2989,9 @@ index 11f19e4..d96d5fb 100644
 +                }
 +            });
 +        });
-+    }
-+
+     }
+ 
+-    /** In the card size the icon is drawn by {@link #onDraw}, not as a compound drawable. */
 +    /** The notification dot can be turned off per supericon. */
 +    @Override
 +    protected void drawDotIfNecessary(Canvas canvas) {
@@ -2824,24 +3034,7 @@ index 11f19e4..d96d5fb 100644
 +            final List<Chip> out = new ArrayList<>();
 +            try {
 +                DeepShortcutManager manager = DeepShortcutManager.getInstance(ctx);
-+                List<ShortcutInfo> list = manager.queryForShortcutsContainer(component, user);
-+                list = PopupPopulator.sortAndFilterShortcuts(list, null);
-+                if (!chosen.isEmpty()) {
-+                    Map<String, ShortcutInfo> byId = new HashMap<>();
-+                    for (ShortcutInfo si : list) {
-+                        byId.put(si.getId(), si);
-+                    }
-+                    List<ShortcutInfo> picked = new ArrayList<>();
-+                    for (String id : chosen) {
-+                        ShortcutInfo si = byId.get(id);
-+                        if (si != null) {
-+                            picked.add(si);
-+                        }
-+                    }
-+                    if (!picked.isEmpty()) {
-+                        list = picked;
-+                    }
-+                }
++                List<ShortcutInfo> list = queryShortcuts(manager, component, user, chosen);
 +                for (ShortcutInfo si : list) {
 +                    if (out.size() >= max) {
 +                        break;
@@ -2875,6 +3068,73 @@ index 11f19e4..d96d5fb 100644
 +        });
 +    }
 +
++    /** The app's shortcuts, the chosen ones first (and only them, if any of them exist). */
++    private static List<ShortcutInfo> queryShortcuts(DeepShortcutManager manager,
++            ComponentName component, UserHandle user, List<String> chosen) {
++        List<ShortcutInfo> list = manager.queryForShortcutsContainer(component, user);
++        list = PopupPopulator.sortAndFilterShortcuts(list, null);
++        if (!chosen.isEmpty()) {
++            Map<String, ShortcutInfo> byId = new HashMap<>();
++            for (ShortcutInfo si : list) {
++                byId.put(si.getId(), si);
++            }
++            List<ShortcutInfo> picked = new ArrayList<>();
++            for (String id : chosen) {
++                ShortcutInfo si = byId.get(id);
++                if (si != null) {
++                    picked.add(si);
++                }
++            }
++            if (!picked.isEmpty()) {
++                list = picked;
++            }
++        }
++        return list;
++    }
++
++    // ---------------------------------------------------------------- gestures
++
++    private boolean hasSwipe(boolean up) {
++        return (up ? mSettings.swipeUp : mSettings.swipeDown) != SuperIconSettings.GESTURE_NONE;
++    }
++
++    /** Starts what a swipe up or down is set to do. */
++    private void runSwipe(boolean up) {
++        int type = up ? mSettings.swipeUp : mSettings.swipeDown;
++        String app = up ? mSettings.swipeUpApp : mSettings.swipeDownApp;
++        final Context ctx = getContext().getApplicationContext();
++        if (type == SuperIconSettings.GESTURE_APP) {
++            ComponentName cn = ComponentName.unflattenFromString(app);
++            if (cn != null) {
++                try {
++                    ((android.content.pm.LauncherApps) ctx.getSystemService(
++                            Context.LAUNCHER_APPS_SERVICE))
++                            .startMainActivity(cn, android.os.Process.myUserHandle(), null, null);
++                } catch (RuntimeException e) {
++                    // The app may have been uninstalled
++                }
++            }
++        } else if (type == SuperIconSettings.GESTURE_SHORTCUT && mComponent != null
++                && mUser != null) {
++            final ComponentName component = mComponent;
++            final UserHandle user = mUser;
++            final List<String> chosen = new ArrayList<>(mSettings.chipIds);
++            AsyncTask.THREAD_POOL_EXECUTOR.execute(() -> {
++                try {
++                    DeepShortcutManager manager = DeepShortcutManager.getInstance(ctx);
++                    List<ShortcutInfo> list = queryShortcuts(manager, component, user, chosen);
++                    if (!list.isEmpty()) {
++                        final ShortcutInfo si = list.get(0);
++                        post(() -> manager.startShortcut(si.getPackage(), si.getId(), null, null,
++                                user));
++                    }
++                } catch (RuntimeException e) {
++                    // No shortcut to start
++                }
++            });
++        }
++    }
++
 +    private int chipAt(float x, float y) {
 +        float slop = 4 * mDensity;
 +        for (int i = 0; i < mLayout.chipCountFit && i < mChips.size(); i++) {
@@ -2893,8 +3153,47 @@ index 11f19e4..d96d5fb 100644
 +            case MotionEvent.ACTION_DOWN:
 +                mDownChip = chipAt(event.getX(), event.getY());
 +                mPendingChip = -1;
++                mGestureX = event.getX();
++                mGestureY = event.getY();
++                mGestureState = 0;
++                break;
++            case MotionEvent.ACTION_MOVE:
++                if (mGestureState == 0 && (hasSwipe(true) || hasSwipe(false))) {
++                    float dx = event.getX() - mGestureX;
++                    float dy = event.getY() - mGestureY;
++                    float slop = android.view.ViewConfiguration.get(getContext())
++                            .getScaledTouchSlop() * 0.4f;
++                    if (Math.abs(dy) > slop && Math.abs(dy) > Math.abs(dx) * 1.5f
++                            && hasSwipe(dy < 0)) {
++                        // A vertical swipe: keep the launcher's own swipes (all apps, page
++                        // scrolling) from taking over this touch
++                        mGestureState = 1;
++                        if (getParent() != null) {
++                            getParent().requestDisallowInterceptTouchEvent(true);
++                        }
++                    } else if (Math.abs(dx) > slop || Math.abs(dy) > slop) {
++                        mGestureState = -1;
++                    }
++                }
 +                break;
 +            case MotionEvent.ACTION_UP:
++                if (mGestureState == 1) {
++                    float dy = event.getY() - mGestureY;
++                    if (Math.abs(dy) >= 32 * mDensity && hasSwipe(dy < 0)) {
++                        final boolean up = dy < 0;
++                        mPendingChip = -1;
++                        mDownChip = -1;
++                        mGestureState = 0;
++                        // End the touch as cancelled so that it is not also a click
++                        MotionEvent cancel = MotionEvent.obtain(event);
++                        cancel.setAction(MotionEvent.ACTION_CANCEL);
++                        super.onTouchEvent(cancel);
++                        cancel.recycle();
++                        runSwipe(up);
++                        return true;
++                    }
++                }
++                mGestureState = 0;
 +                mPendingChip = mDownChip >= 0 && chipAt(event.getX(), event.getY()) == mDownChip
 +                        ? mDownChip : -1;
 +                mDownChip = -1;
@@ -2902,14 +3201,14 @@ index 11f19e4..d96d5fb 100644
 +            case MotionEvent.ACTION_CANCEL:
 +                mDownChip = -1;
 +                mPendingChip = -1;
++                mGestureState = 0;
 +                break;
 +            default:
 +                break;
 +        }
 +        return super.onTouchEvent(event);
-     }
- 
--    /** In the card size the icon is drawn by {@link #onDraw}, not as a compound drawable. */
++    }
++
 +    /** A tap on a chip starts that shortcut instead of the app. */
 +    @Override
 +    public boolean performClick() {
@@ -2970,7 +3269,7 @@ index 11f19e4..d96d5fb 100644
          IconShape shape = IconShape.getShape();
          if (shape == sShape) {
              return sCornerRatio;
-@@ -176,35 +529,32 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -176,35 +626,32 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          return ratio;
      }
  
@@ -2980,12 +3279,12 @@ index 11f19e4..d96d5fb 100644
 +    /** The label size before the per-icon size setting is applied. */
 +    public float getBaseTextSizePx() {
 +        return mBaseTextSize;
-+    }
-+
-+    public int getDefaultLabelColor() {
-+        return mDefaultTextColors.getDefaultColor();
      }
  
++    public int getDefaultLabelColor() {
++        return mDefaultTextColors.getDefaultColor();
++    }
++
 +    public int getRegularIconSizePx() {
 +        return regularIconSize();
 +    }
@@ -3025,7 +3324,7 @@ index 11f19e4..d96d5fb 100644
          }
          super.onMeasure(widthMeasureSpec, heightMeasureSpec);
      }
-@@ -218,8 +568,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -218,8 +665,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          if (text == null || text.length() == 0 || available <= 0) {
              return;
          }
@@ -3037,7 +3336,7 @@ index 11f19e4..d96d5fb 100644
          mMeasurePaint.set(getPaint());
          mMeasurePaint.setTypeface(getPaint().getTypeface());
          String[] words = text.toString().split("\\s+");
-@@ -242,48 +593,71 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -242,48 +690,71 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
  
      @Override
      public void getIconBounds(Rect outBounds) {
