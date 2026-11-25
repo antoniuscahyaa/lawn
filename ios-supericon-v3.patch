@@ -1873,7 +1873,7 @@ index 0000000..cb11ee8
 +    }
 +}
 diff --git a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android/launcher3/views/SuperIconView.java
-index 11f19e4..37ec932 100644
+index 11f19e4..70bbad1 100644
 --- a/src/com/android/launcher3/views/SuperIconView.java
 +++ b/src/com/android/launcher3/views/SuperIconView.java
 @@ -15,57 +15,97 @@
@@ -1991,7 +1991,7 @@ index 11f19e4..37ec932 100644
  
      public SuperIconView(Context context) {
          this(context, null);
-@@ -81,77 +121,249 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -81,77 +121,250 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          mStrokePaint.setStyle(Paint.Style.STROKE);
          mStrokePaint.setStrokeWidth(mDensity);
          mBaseTextSize = getTextSize();
@@ -2007,7 +2007,8 @@ index 11f19e4..37ec932 100644
      @Override
      protected boolean isTextHidden() {
 -        return false;
-+        return !mSettings.showLabel;
++        // Also called from the BubbleTextView constructor, before our fields are initialised
++        return mSettings != null && !mSettings.showLabel;
 +    }
 +
 +    @Override
@@ -2270,7 +2271,7 @@ index 11f19e4..37ec932 100644
          IconShape shape = IconShape.getShape();
          if (shape == sShape) {
              return sCornerRatio;
-@@ -176,35 +388,31 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -176,35 +389,31 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          return ratio;
      }
  
@@ -2324,7 +2325,7 @@ index 11f19e4..37ec932 100644
          }
          super.onMeasure(widthMeasureSpec, heightMeasureSpec);
      }
-@@ -218,8 +426,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -218,8 +427,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          if (text == null || text.length() == 0 || available <= 0) {
              return;
          }
@@ -2336,7 +2337,7 @@ index 11f19e4..37ec932 100644
          mMeasurePaint.set(getPaint());
          mMeasurePaint.setTypeface(getPaint().getTypeface());
          String[] words = text.toString().split("\\s+");
-@@ -242,48 +451,71 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -242,48 +452,71 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
  
      @Override
      public void getIconBounds(Rect outBounds) {
