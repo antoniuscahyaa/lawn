@@ -1,0 +1,154 @@
+diff --git a/res/drawable/popup_glass_bg.xml b/res/drawable/popup_glass_bg.xml
+new file mode 100644
+index 0000000..053fea5
+--- /dev/null
++++ b/res/drawable/popup_glass_bg.xml
+@@ -0,0 +1,23 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++Copyright (C) 2026 The Android Open Source Project
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++        http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
++-->
++<!-- Translucent rounded card with a hairline border, for the long-press popups -->
++<shape xmlns:android="http://schemas.android.com/apk/res/android"
++       android:shape="rectangle">
++    <solid android:color="?attr/popupGlassColor" />
++    <stroke android:width="1dp" android:color="?attr/popupGlassStroke" />
++    <corners android:radius="@dimen/popup_glass_radius" />
++</shape>
+diff --git a/res/layout/longpress_options_menu.xml b/res/layout/longpress_options_menu.xml
+index 20bb5b8..7ddff03 100644
+--- a/res/layout/longpress_options_menu.xml
++++ b/res/layout/longpress_options_menu.xml
+@@ -18,7 +18,7 @@
+     android:id="@+id/deep_shortcuts_container"
+     android:layout_width="wrap_content"
+     android:layout_height="wrap_content"
+-    android:background="?attr/popupColorPrimary"
++    android:background="@drawable/popup_glass_bg"
+     android:clipToPadding="false"
+     android:clipChildren="false"
+     android:elevation="@dimen/deep_shortcuts_elevation"
+diff --git a/res/layout/notification_content.xml b/res/layout/notification_content.xml
+index d01be01..0fd12f3 100644
+--- a/res/layout/notification_content.xml
++++ b/res/layout/notification_content.xml
+@@ -58,7 +58,7 @@
+             android:id="@+id/text_and_background"
+             android:layout_width="match_parent"
+             android:layout_height="match_parent"
+-            android:background="?attr/popupColorPrimary"
++            android:background="@android:color/transparent"
+             android:gravity="center_vertical"
+             android:orientation="vertical"
+             android:paddingBottom="14dp"
+diff --git a/res/layout/popup_container.xml b/res/layout/popup_container.xml
+index c737407..cda33cb 100644
+--- a/res/layout/popup_container.xml
++++ b/res/layout/popup_container.xml
+@@ -19,7 +19,7 @@
+     android:id="@+id/deep_shortcuts_container"
+     android:layout_width="wrap_content"
+     android:layout_height="wrap_content"
+-    android:background="?attr/popupColorPrimary"
++    android:background="@drawable/popup_glass_bg"
+     android:clipToPadding="false"
+     android:clipChildren="false"
+     android:elevation="@dimen/deep_shortcuts_elevation"
+diff --git a/res/layout/system_shortcut_icons.xml b/res/layout/system_shortcut_icons.xml
+index a340f4f..e081aa4 100644
+--- a/res/layout/system_shortcut_icons.xml
++++ b/res/layout/system_shortcut_icons.xml
+@@ -21,7 +21,7 @@
+     android:layout_height="@dimen/system_shortcut_header_height"
+     android:orientation="horizontal"
+     android:gravity="end|center_vertical"
+-    android:background="?attr/popupColorSecondary"
++    android:background="?attr/popupGlassHeader"
+     android:clipToPadding="true">
+ 
+     <Space android:layout_width="0dp"
+diff --git a/res/values/attrs.xml b/res/values/attrs.xml
+index 85ec5a0..fd679ea 100644
+--- a/res/values/attrs.xml
++++ b/res/values/attrs.xml
+@@ -23,6 +23,10 @@
+     <attr name="allAppsInterimScrimAlpha" format="integer" />
+     <attr name="allAppsNavBarScrimColor" format="color" />
+     <attr name="popupColorPrimary" format="color" />
++    <!-- Glass-card look of the long-press popups -->
++    <attr name="popupGlassColor" format="color" />
++    <attr name="popupGlassHeader" format="color" />
++    <attr name="popupGlassStroke" format="color" />
+     <attr name="popupColorSecondary" format="color" />
+     <attr name="popupColorTertiary" format="color" />
+     <attr name="isMainColorDark" format="boolean" />
+diff --git a/res/values/dimens.xml b/res/values/dimens.xml
+index 22f4843..d400662 100644
+--- a/res/values/dimens.xml
++++ b/res/values/dimens.xml
+@@ -311,5 +311,6 @@
+ 
+ <!-- Theming related -->
+     <dimen name="default_dialog_corner_radius">8dp</dimen>
++    <dimen name="popup_glass_radius">22dp</dimen>
+ 
+ </resources>
+diff --git a/res/values/styles.xml b/res/values/styles.xml
+index 8e93db5..9e3a2b4 100644
+--- a/res/values/styles.xml
++++ b/res/values/styles.xml
+@@ -38,6 +38,9 @@
+         <item name="allAppsScrimColor">#EAFFFFFF</item>
+         <item name="allAppsInterimScrimAlpha">46</item>
+         <item name="allAppsNavBarScrimColor">@color/all_apps_navbar_color</item>
++        <item name="popupGlassColor">#E8FFFFFF</item>
++        <item name="popupGlassHeader">#14000000</item>
++        <item name="popupGlassStroke">#99FFFFFF</item>
+         <item name="popupColorPrimary">#FFF</item>
+         <item name="popupColorSecondary">#F5F5F5</item> <!-- Gray 100 -->
+         <item name="popupColorTertiary">#E0E0E0</item> <!-- Gray 300 -->
+@@ -91,6 +94,9 @@
+         <item name="allAppsScrimColor">#EA212121</item>
+         <item name="allAppsInterimScrimAlpha">102</item>
+         <item name="allAppsNavBarScrimColor">#80000000</item>
++        <item name="popupGlassColor">#E6232427</item>
++        <item name="popupGlassHeader">#1AFFFFFF</item>
++        <item name="popupGlassStroke">#33FFFFFF</item>
+         <item name="popupColorPrimary">#3C4043</item> <!-- Gray 800 -->
+         <item name="popupColorSecondary">#5F6368</item> <!-- Gray 700 -->
+         <item name="popupColorTertiary">#757575</item> <!-- Gray 600 -->
+diff --git a/src/com/android/launcher3/popup/ArrowPopup.java b/src/com/android/launcher3/popup/ArrowPopup.java
+index 28000b9..4bd7798 100644
+--- a/src/com/android/launcher3/popup/ArrowPopup.java
++++ b/src/com/android/launcher3/popup/ArrowPopup.java
+@@ -82,7 +82,8 @@ public abstract class ArrowPopup extends AbstractFloatingView {
+     public ArrowPopup(Context context, AttributeSet attrs, int defStyleAttr) {
+         super(context, attrs, defStyleAttr);
+         mInflater = LayoutInflater.from(context);
+-        mOutlineRadius = Themes.getDialogCornerRadius(context);
++        mOutlineRadius = Math.max(Themes.getDialogCornerRadius(context),
++                context.getResources().getDimension(R.dimen.popup_glass_radius));
+         mLauncher = Launcher.getLauncher(context);
+         mIsRtl = Utilities.isRtl(getResources());
+ 
+@@ -189,7 +190,7 @@ public abstract class ArrowPopup extends AbstractFloatingView {
+             ShapeDrawable arrowDrawable = new ShapeDrawable(TriangleShape.create(
+                     arrowLp.width, arrowLp.height, !mIsAboveIcon));
+             Paint arrowPaint = arrowDrawable.getPaint();
+-            arrowPaint.setColor(Themes.getAttrColor(getContext(), R.attr.popupColorPrimary));
++            arrowPaint.setColor(Themes.getAttrColor(getContext(), R.attr.popupGlassColor));
+             // The corner path effect won't be reflected in the shadow, but shouldn't be noticeable.
+             int radius = getResources().getDimensionPixelSize(R.dimen.popup_arrow_corner_radius);
+             arrowPaint.setPathEffect(new CornerPathEffect(radius));
