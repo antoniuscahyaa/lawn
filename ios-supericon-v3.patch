@@ -1873,10 +1873,10 @@ index 0000000..cb11ee8
 +    }
 +}
 diff --git a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android/launcher3/views/SuperIconView.java
-index 11f19e4..dd1151c 100644
+index 11f19e4..37ec932 100644
 --- a/src/com/android/launcher3/views/SuperIconView.java
 +++ b/src/com/android/launcher3/views/SuperIconView.java
-@@ -15,57 +15,96 @@
+@@ -15,57 +15,97 @@
   */
  package com.android.launcher3.views;
  
@@ -1978,6 +1978,7 @@ index 11f19e4..dd1151c 100644
 +    private SuperIconSettings mSettings = new SuperIconSettings();
 +    private Bitmap mImage;
 +    private Drawable mShownIcon;
++    private CharSequence mLabelText;
 +    private boolean mSolidStyle;
 +    private int mFill;
 +    private int mLabelColor;
@@ -1990,18 +1991,25 @@ index 11f19e4..dd1151c 100644
  
      public SuperIconView(Context context) {
          this(context, null);
-@@ -81,6 +120,7 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -81,77 +121,249 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          mStrokePaint.setStyle(Paint.Style.STROKE);
          mStrokePaint.setStrokeWidth(mDensity);
          mBaseTextSize = getTextSize();
 +        mDefaultTextColors = getTextColors();
      }
  
-     /** The label is always shown inside a supericon, even if app labels are hidden. */
-@@ -89,69 +129,225 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
-         return false;
-     }
- 
+-    /** The label is always shown inside a supericon, even if app labels are hidden. */
++    /**
++     * The label is shown inside a supericon even if app labels are hidden, unless this supericon
++     * has its label turned off. The text itself is removed in that case: making it transparent is
++     * not enough, as launcher state changes animate the text alpha back to opaque.
++     */
+     @Override
+     protected boolean isTextHidden() {
+-        return false;
++        return !mSettings.showLabel;
++    }
++
 +    @Override
 +    protected void onAttachedToWindow() {
 +        super.onAttachedToWindow();
@@ -2031,8 +2039,8 @@ index 11f19e4..dd1151c 100644
 +    private void loadSettings() {
 +        mSettings = SuperIconSettings.load(getContext(), mItemId);
 +        mImage = SuperIconSettings.loadImage(getContext(), mItemId);
-+    }
-+
+     }
+ 
      @Override
      public void applyFromWorkspaceItem(WorkspaceItemInfo info, boolean promiseStateChanged) {
 -        mSolid = WorkspaceItemInfo.isSolidStyle(info.superStyle);
@@ -2048,6 +2056,9 @@ index 11f19e4..dd1151c 100644
 +        // Must be set before the icon is applied so the icon gets the right size
          setIconSize(iconSize());
          super.applyFromWorkspaceItem(info, promiseStateChanged);
++        if (getText().length() == 0) {
++            mLabelText = info.title;
++        }
          mTint = info.iconColor != 0 ? (info.iconColor | 0xFF000000) : 0xFF5F5E5A;
 +        if (isAttachedToWindow() && mComponent != null) {
 +            SuperIconSettings.setActive(mItemId, mComponent.flattenToShortString());
@@ -2080,8 +2091,24 @@ index 11f19e4..dd1151c 100644
          setEllipsize(TextUtils.TruncateAt.END);
 -        if (mSolid) {
 -            setTextColor(tintIsLight() ? Color.argb(230, 20, 20, 20) : Color.WHITE);
+-        }
+-        if (mCard) {
+-            setGravity(Gravity.BOTTOM | Gravity.START);
+-            setCompoundDrawablePadding(0);
+-            setCompoundDrawables(null, null, null, null);
+-        } else {
+-            setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+-            setCompoundDrawablePadding((int) ((mSolid ? 10 : 7) * mDensity));
 +        setTextColor(mLabelColor);
-+        // Fully transparent text also drops the text shadows
++        CharSequence current = getText();
++        if (mSettings.showLabel) {
++            if (current.length() == 0 && mLabelText != null) {
++                setText(mLabelText);
++            }
++        } else if (current.length() > 0) {
++            mLabelText = current;
++            setText("");
+         }
 +        setTextVisibility(mSettings.showLabel);
 +
 +        int h = mSettings.effectiveH(mSpanX, mSpanY);
@@ -2090,9 +2117,10 @@ index 11f19e4..dd1151c 100644
 +        int gv = v == 0 ? Gravity.TOP : (v == 1 ? Gravity.CENTER_VERTICAL : Gravity.BOTTOM);
 +        setGravity(gh | gv);
 +        setCompoundDrawables(null, null, null, null);
-+        requestLayout();
-+    }
-+
+         requestLayout();
+     }
+ 
+-    /** In the card size the icon is drawn by {@link #onDraw}, not as a compound drawable. */
 +    // ------------------------------------------------------------------ chips
 +
 +    /** Loads the app's shortcuts (and their icons) in the background. */
@@ -2106,14 +2134,7 @@ index 11f19e4..dd1151c 100644
 +                applyStyle();
 +            }
 +            return;
-         }
--        if (mCard) {
--            setGravity(Gravity.BOTTOM | Gravity.START);
--            setCompoundDrawablePadding(0);
--            setCompoundDrawables(null, null, null, null);
--        } else {
--            setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
--            setCompoundDrawablePadding((int) ((mSolid ? 10 : 7) * mDensity));
++        }
 +        final Context ctx = getContext().getApplicationContext();
 +        final int token = ++mLoadToken;
 +        final int dpi = getResources().getDisplayMetrics().densityDpi;
@@ -2165,12 +2186,10 @@ index 11f19e4..dd1151c 100644
 +                    && y >= r.top - slop && y <= r.bottom + slop) {
 +                return i;
 +            }
-         }
--        requestLayout();
++        }
 +        return -1;
-     }
- 
--    /** In the card size the icon is drawn by {@link #onDraw}, not as a compound drawable. */
++    }
++
 +    @Override
 +    public boolean onTouchEvent(MotionEvent event) {
 +        switch (event.getActionMasked()) {
@@ -2251,7 +2270,7 @@ index 11f19e4..dd1151c 100644
          IconShape shape = IconShape.getShape();
          if (shape == sShape) {
              return sCornerRatio;
-@@ -176,35 +372,31 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -176,35 +388,31 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          return ratio;
      }
  
@@ -2265,12 +2284,12 @@ index 11f19e4..dd1151c 100644
 +
 +    public int getDefaultLabelColor() {
 +        return mDefaultTextColors.getDefaultColor();
-+    }
-+
-+    public int getRegularIconSizePx() {
-+        return regularIconSize();
      }
  
++    public int getRegularIconSizePx() {
++        return regularIconSize();
++    }
++
 +    // ------------------------------------------------------------ measure, draw
 +
      @Override
@@ -2305,7 +2324,7 @@ index 11f19e4..dd1151c 100644
          }
          super.onMeasure(widthMeasureSpec, heightMeasureSpec);
      }
-@@ -218,8 +410,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -218,8 +426,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          if (text == null || text.length() == 0 || available <= 0) {
              return;
          }
@@ -2317,7 +2336,7 @@ index 11f19e4..dd1151c 100644
          mMeasurePaint.set(getPaint());
          mMeasurePaint.setTypeface(getPaint().getTypeface());
          String[] words = text.toString().split("\\s+");
-@@ -242,48 +435,71 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -242,48 +451,71 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
  
      @Override
      public void getIconBounds(Rect outBounds) {
