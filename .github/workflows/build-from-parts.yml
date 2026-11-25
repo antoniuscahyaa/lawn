@@ -131,6 +131,14 @@ jobs:
             echo "ios-supericon-v3.patch (atau v2) tidak ada di repo, dilewati"
           fi
 
+      - name: Terapkan patch popup kartu kaca (opsional)
+        run: |
+          if [ -f ios-popup-glass.patch ]; then
+            patch -p1 -d src < ios-popup-glass.patch
+          else
+            echo "ios-popup-glass.patch tidak ada di repo, dilewati"
+          fi
+
       - name: Atur varian ci (paket ch.deletescape.lawnchair.ci)
         working-directory: src
         run: |
