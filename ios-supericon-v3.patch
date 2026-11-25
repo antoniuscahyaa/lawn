@@ -57,8 +57,39 @@ index bb432f0..58c1e62 100644
      }
  
      /**
+diff --git a/src/com/android/launcher3/popup/PopupContainerWithArrow.java b/src/com/android/launcher3/popup/PopupContainerWithArrow.java
+index 88b8fc1..0205b04 100644
+--- a/src/com/android/launcher3/popup/PopupContainerWithArrow.java
++++ b/src/com/android/launcher3/popup/PopupContainerWithArrow.java
+@@ -73,7 +73,9 @@ import com.android.launcher3.testing.TestProtocol;
+ import com.android.launcher3.touch.ItemClickHandler;
+ import com.android.launcher3.touch.ItemLongClickListener;
+ import com.android.launcher3.util.PackageUserKey;
++import com.android.launcher3.supericon.SuperIconSettings;
+ import com.android.launcher3.views.BaseDragLayer;
++import com.android.launcher3.views.SuperIconView;
+ 
+ import java.util.ArrayList;
+ import java.util.List;
+@@ -237,9 +239,14 @@ public class PopupContainerWithArrow extends ArrowPopup implements DragSource,
+     protected void populateAndShow(
+             BubbleTextView icon, ItemInfo item, SystemShortcutFactory factory) {
+         PopupDataProvider popupDataProvider = mLauncher.getPopupDataProvider();
++        // A supericon can leave the app's shortcuts and notifications out of this menu; the
++        // system shortcuts (including the supericon menu itself) always stay.
++        boolean extras = !(icon instanceof SuperIconView)
++                || SuperIconSettings.load(mLauncher, item.id).popupExtras;
+         populateAndShow(icon,
+-                popupDataProvider.getShortcutCountForItem(item),
+-                popupDataProvider.getNotificationKeysForItem(item),
++                extras ? popupDataProvider.getShortcutCountForItem(item) : 0,
++                extras ? popupDataProvider.getNotificationKeysForItem(item)
++                        : new ArrayList<NotificationKeyData>(),
+                 factory.getEnabledShortcuts(mLauncher, item));
+     }
+ 
 diff --git a/src/com/android/launcher3/popup/SuperIconMenu.java b/src/com/android/launcher3/popup/SuperIconMenu.java
-index 242a23e..d7080db 100644
+index 242a23e..e8e4e30 100644
 --- a/src/com/android/launcher3/popup/SuperIconMenu.java
 +++ b/src/com/android/launcher3/popup/SuperIconMenu.java
 @@ -15,6 +15,8 @@
@@ -103,7 +134,7 @@ index 242a23e..d7080db 100644
  
      private SuperIconMenu() { }
  
-@@ -47,47 +56,95 @@ public final class SuperIconMenu {
+@@ -47,47 +56,100 @@ public final class SuperIconMenu {
          if (icon == null) {
              return;
          }
@@ -148,12 +179,7 @@ index 242a23e..d7080db 100644
 +                launcher.startActivity(new Intent(launcher, SuperIconBackupActivity.class));
 +                return true;
 +            }));
-         }
--        for (int i = 0; i < SIZES.length; i++) {
--            final int sx = SIZES[i][0];
--            final int sy = SIZES[i][1];
--            if (isSuper && info.spanX == sx && info.spanY == sy) {
--                continue;
++        }
 +        OptionsPopupView.show(launcher, new RectF(rect), items);
 +    }
 +
@@ -177,6 +203,16 @@ index 242a23e..d7080db 100644
 +                info.iconColor != 0 ? (info.iconColor | 0xFF000000) : 0xFF5F5E5A);
 +        i.putExtra(SuperIconEditActivity.EXTRA_DEFAULT_COLOR, view.getDefaultLabelColor());
 +        i.putExtra(SuperIconEditActivity.EXTRA_RATIO, SuperIconView.cornerRatio());
++        if (info.getTargetComponent() != null) {
++            i.putExtra(SuperIconEditActivity.EXTRA_COMPONENT,
++                    info.getTargetComponent().flattenToShortString());
+         }
+-        for (int i = 0; i < SIZES.length; i++) {
+-            final int sx = SIZES[i][0];
+-            final int sy = SIZES[i][1];
+-            if (isSuper && info.spanX == sx && info.spanY == sy) {
+-                continue;
++        i.putExtra(SuperIconEditActivity.EXTRA_USER, info.user);
 +        Bitmap bmp = info.iconBitmap;
 +        if (bmp != null) {
 +            File f = new File(launcher.getCacheDir(), "supericon_icon_" + info.id + ".png");
@@ -228,7 +264,7 @@ index 242a23e..d7080db 100644
      }
  
      /**
-@@ -112,12 +169,13 @@ public final class SuperIconMenu {
+@@ -112,12 +174,13 @@ public final class SuperIconMenu {
          return null;
      }
  
@@ -244,7 +280,7 @@ index 242a23e..d7080db 100644
          }
          CellLayout layout = (CellLayout) old.getParent().getParent();
          CellLayout.LayoutParams lp = (CellLayout.LayoutParams) old.getLayoutParams();
-@@ -129,8 +187,7 @@ public final class SuperIconMenu {
+@@ -129,8 +192,7 @@ public final class SuperIconMenu {
              int[] spot = findSpot(layout, lp.cellX, lp.cellY, newSpanX, newSpanY);
              layout.markCellsAsOccupiedForView(old);
              if (spot == null) {
@@ -254,7 +290,7 @@ index 242a23e..d7080db 100644
              }
              newX = spot[0];
              newY = spot[1];
-@@ -141,8 +198,13 @@ public final class SuperIconMenu {
+@@ -141,8 +203,13 @@ public final class SuperIconMenu {
          launcher.getModelWriter().modifyItemInDatabase(info, info.container, info.screenId,
                  newX, newY, newSpanX, newSpanY);
          launcher.getModelWriter().updateItemInDatabase(info);
@@ -553,10 +589,10 @@ index 0000000..fa81125
 +}
 diff --git a/src/com/android/launcher3/supericon/SuperIconEditActivity.java b/src/com/android/launcher3/supericon/SuperIconEditActivity.java
 new file mode 100644
-index 0000000..728d79c
+index 0000000..40df4fc
 --- /dev/null
 +++ b/src/com/android/launcher3/supericon/SuperIconEditActivity.java
-@@ -0,0 +1,705 @@
+@@ -0,0 +1,1061 @@
 +/*
 + * Copyright (C) 2026 The Android Open Source Project
 + *
@@ -575,7 +611,9 @@ index 0000000..728d79c
 +package com.android.launcher3.supericon;
 +
 +import android.app.Activity;
++import android.content.ComponentName;
 +import android.content.Context;
++import android.content.pm.ShortcutInfo;
 +import android.content.Intent;
 +import android.graphics.Bitmap;
 +import android.graphics.BitmapFactory;
@@ -586,13 +624,17 @@ index 0000000..728d79c
 +import android.graphics.drawable.GradientDrawable;
 +import android.net.Uri;
 +import android.os.Bundle;
++import android.os.UserHandle;
 +import android.text.Editable;
 +import android.text.InputType;
 +import android.text.Layout;
 +import android.text.StaticLayout;
 +import android.text.TextPaint;
++import android.text.TextUtils;
 +import android.text.TextWatcher;
 +import android.view.Gravity;
++import android.view.MotionEvent;
++import android.view.ScaleGestureDetector;
 +import android.view.View;
 +import android.view.ViewGroup;
 +import android.widget.Button;
@@ -608,9 +650,13 @@ index 0000000..728d79c
 +import android.widget.Toast;
 +
 +import com.android.launcher3.WorkspaceItemInfo;
++import com.android.launcher3.popup.PopupPopulator;
 +import com.android.launcher3.popup.SuperIconMenu;
++import com.android.launcher3.shortcuts.DeepShortcutManager;
 +
 +import java.io.File;
++import java.util.ArrayList;
++import java.util.List;
 +
 +/**
 + * Editor for one supericon: size and style, background (colour from the style, adaptive to the
@@ -633,6 +679,8 @@ index 0000000..728d79c
 +    public static final String EXTRA_DEFAULT_COLOR = "defColor";
 +    public static final String EXTRA_RATIO = "ratio";
 +    public static final String EXTRA_ICON = "icon";
++    public static final String EXTRA_COMPONENT = "component";
++    public static final String EXTRA_USER = "user";
 +
 +    private static final int REQ_PICK = 1;
 +    private static final int[] SWATCHES = {
@@ -655,7 +703,13 @@ index 0000000..728d79c
 +    private boolean mSyncing;
 +    private Preview mPreview;
 +    private SeekBar mZoom, mPanX, mPanY, mDim, mLabelSize;
-+    private CheckBox mShowIcon, mShowLabel, mShowChips;
++    private CheckBox mShowIcon, mShowLabel, mShowChips, mRing, mShine, mShowDot, mPopupExtras;
++    private SeekBar mIconScale, mGlassAlpha;
++    private RadioGroup mSubGroup;
++    private EditText mSubText;
++    private LinearLayout mShortcutBox;
++    private final List<String> mShortcutIds = new ArrayList<>();
++    private final List<CheckBox> mShortcutChecks = new ArrayList<>();
 +    private RadioGroup mSizeGroup, mStyleGroup, mBgGroup;
 +    private EditText mHex;
 +    private final View[] mSwatchViews = new View[SWATCHES.length];
@@ -713,6 +767,22 @@ index 0000000..728d79c
 +        pl.topMargin = pad;
 +        pl.bottomMargin = pad / 2;
 +        root.addView(mPreview, pl);
++        mPreview.onGesture = this::syncImageControls;
++
++        // ---- presets and copying a style
++        HorizontalScrollView presetScroll = new HorizontalScrollView(this);
++        LinearLayout presets = row();
++        String[] presetNames = {"Kaca", "Warna", "Foto gelap", "Minimal"};
++        for (int i = 0; i < presetNames.length; i++) {
++            final int index = i;
++            presets.addView(button(presetNames[i], v -> applyPreset(index)));
++        }
++        presetScroll.addView(presets);
++        root.addView(presetScroll);
++        LinearLayout clip = row();
++        clip.addView(button("Salin gaya", v -> copyStyle()), weight());
++        clip.addView(button("Tempel gaya", v -> pasteStyle()), weight());
++        root.addView(clip);
 +
 +        // ---- size and style
 +        root.addView(section("Ukuran dan gaya"));
@@ -732,6 +802,11 @@ index 0000000..728d79c
 +            mPreview.invalidate();
 +        });
 +        root.addView(mStyleGroup);
++        mGlassAlpha = seek(root, "Kepekatan kaca (%)", 5, 60, v -> {
++            mSettings.glassAlpha = v;
++            mPreview.invalidate();
++        });
++        mShine = check(root, "Kilau kaca", c -> mSettings.glassShine = c);
 +
 +        // ---- background colour
 +        root.addView(section("Warna latar"));
@@ -863,6 +938,58 @@ index 0000000..728d79c
 +            mPreview.invalidate();
 +        }));
 +
++        // ---- icon
++        root.addView(section("Ikon"));
++        mIconScale = seek(root, "Ukuran ikon (%)", 50, 140, v -> {
++            mSettings.iconScale = v / 100f;
++            mPreview.invalidate();
++        });
++        mRing = check(root, "Cincin putih di sekitar ikon (gaya warna)",
++                c -> mSettings.iconRing = c);
++
++        // ---- subtitle
++        root.addView(section("Subjudul"));
++        mSubGroup = radios(new String[] {"Tidak ada", "Teks sendiri", "Jumlah notifikasi",
++                "Isi notifikasi terakhir"}, false, i -> {
++            mSettings.subtitleMode = i;
++            mSubText.setEnabled(i == SuperIconSettings.SUB_TEXT);
++            mPreview.invalidate();
++        });
++        root.addView(mSubGroup);
++        mSubText = new EditText(this);
++        mSubText.setHint("mis. Easy run · 9 km");
++        mSubText.setSingleLine(true);
++        mSubText.addTextChangedListener(new TextWatcher() {
++            @Override
++            public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
++
++            @Override
++            public void onTextChanged(CharSequence s, int a, int b, int c) { }
++
++            @Override
++            public void afterTextChanged(Editable e) {
++                if (!mSyncing) {
++                    mSettings.subtitleText = e.toString();
++                    mPreview.invalidate();
++                }
++            }
++        });
++        root.addView(mSubText);
++        TextView subNote = new TextView(this);
++        subNote.setText("Notifikasi butuh izin akses notifikasi untuk launcher. Isi "
++                + "notifikasi tampil di layar utama, jadi pakai dengan hati-hati.");
++        subNote.setTextSize(12);
++        root.addView(subNote);
++
++        // ---- shortcuts
++        root.addView(section("Pintasan aplikasi yang tampil"));
++        mShortcutBox = new LinearLayout(this);
++        mShortcutBox.setOrientation(LinearLayout.VERTICAL);
++        TextView loading = new TextView(this);
++        loading.setText("Memuat pintasan…");
++        mShortcutBox.addView(loading);
++        root.addView(mShortcutBox);
++
 +        // ---- what is shown
 +        mShowIcon = check(root, "Tampilkan ikon", c -> mSettings.showIcon = c);
 +        mShowLabel = check(root, "Tampilkan label", c -> mSettings.showLabel = c);
@@ -870,6 +997,18 @@ index 0000000..728d79c
 +            mSettings.showChips = c;
 +            refreshGrid();
 +        });
++        mShowDot = check(root, "Titik notifikasi di ikon", c -> mSettings.showDot = c);
++        mPopupExtras = check(root, "Pintasan dan notifikasi di menu tekan-lama",
++                c -> mSettings.popupExtras = c);
++        root.addView(button("Matikan semua pintasan dan notifikasi", v -> {
++            mSettings.showChips = false;
++            mSettings.showDot = false;
++            mSettings.popupExtras = false;
++            if (mSettings.subtitleMode >= SuperIconSettings.SUB_COUNT) {
++                mSettings.subtitleMode = SuperIconSettings.SUB_NONE;
++            }
++            syncControls();
++        }));
 +
 +        LinearLayout actions = row();
 +        actions.addView(button("Atur ulang", v -> resetAll()), weight());
@@ -883,6 +1022,169 @@ index 0000000..728d79c
 +        ScrollView scroll = new ScrollView(this);
 +        scroll.addView(root);
 +        setContentView(scroll);
++        syncControls();
++        loadShortcuts(in);
++    }
++
++    /** Lists the app's shortcuts so the ones shown as chips can be chosen. */
++    private void loadShortcuts(Intent in) {
++        String comp = in.getStringExtra(EXTRA_COMPONENT);
++        final ComponentName component = comp == null ? null : ComponentName.unflattenFromString(comp);
++        final UserHandle user = in.getParcelableExtra(EXTRA_USER);
++        final Context ctx = getApplicationContext();
++        if (component == null || user == null) {
++            mShortcutBox.removeAllViews();
++            return;
++        }
++        new Thread(() -> {
++            final List<String> ids = new ArrayList<>();
++            final List<CharSequence> labels = new ArrayList<>();
++            try {
++                List<ShortcutInfo> list = DeepShortcutManager.getInstance(ctx)
++                        .queryForShortcutsContainer(component, user);
++                list = PopupPopulator.sortAndFilterShortcuts(list, null);
++                for (ShortcutInfo si : list) {
++                    ids.add(si.getId());
++                    CharSequence l = si.getShortLabel();
++                    labels.add(l == null ? si.getId() : l);
++                }
++            } catch (RuntimeException e) {
++                ids.clear();
++            }
++            runOnUiThread(() -> {
++                if (isFinishing()) {
++                    return;
++                }
++                mShortcutBox.removeAllViews();
++                if (ids.isEmpty()) {
++                    TextView none = new TextView(this);
++                    none.setText("Aplikasi ini tidak punya pintasan.");
++                    mShortcutBox.addView(none);
++                    return;
++                }
++                TextView hint = new TextView(this);
++                hint.setText("Tanpa centang: pintasan pertama yang ditemukan dipakai.");
++                hint.setTextSize(12);
++                mShortcutBox.addView(hint);
++                mSyncing = true;
++                for (int i = 0; i < ids.size(); i++) {
++                    final String id = ids.get(i);
++                    CheckBox cb = new CheckBox(this);
++                    cb.setText(labels.get(i));
++                    cb.setChecked(mSettings.chipIds.contains(id));
++                    cb.setOnCheckedChangeListener((b, checked) -> {
++                        if (!mSyncing) {
++                            rebuildChipIds();
++                        }
++                    });
++                    mShortcutIds.add(id);
++                    mShortcutChecks.add(cb);
++                    mShortcutBox.addView(cb);
++                }
++                mSyncing = false;
++            });
++        }).start();
++    }
++
++    /** Keeps the chosen shortcut ids in the order they are listed. */
++    private void rebuildChipIds() {
++        mSettings.chipIds = new ArrayList<>();
++        for (int i = 0; i < mShortcutChecks.size(); i++) {
++            if (mShortcutChecks.get(i).isChecked()) {
++                mSettings.chipIds.add(mShortcutIds.get(i));
++            }
++        }
++    }
++
++    /** Sets the image sliders from the settings (after a gesture on the preview). */
++    private void syncImageControls() {
++        setSeek(mZoom, Math.round(mSettings.imageZoom * 100));
++        setSeek(mPanX, Math.round(mSettings.imageX * 100) + 100);
++        setSeek(mPanY, Math.round(mSettings.imageY * 100) + 100);
++    }
++
++    private void applyPreset(int preset) {
++        switch (preset) {
++            case 0: // Kaca
++                mSolidStyle = false;
++                mSettings.bgMode = SuperIconSettings.BG_STYLE;
++                mSettings.glassAlpha = 25;
++                mSettings.glassShine = true;
++                mSettings.showLabel = true;
++                mSettings.showIcon = true;
++                mSettings.labelColor = 0;
++                break;
++            case 1: // Warna
++                mSolidStyle = true;
++                mSettings.bgMode = SuperIconSettings.BG_ADAPTIVE;
++                mSettings.iconRing = true;
++                mSettings.showLabel = true;
++                mSettings.showIcon = true;
++                mSettings.labelColor = 0;
++                break;
++            case 2: // Foto gelap
++                mSettings.imageZoom = 1f;
++                mSettings.imageX = 0f;
++                mSettings.imageY = 0f;
++                mSettings.imageDim = 55;
++                mSettings.showLabel = true;
++                mSettings.labelColor = 0;
++                if (mPreview.image == null) {
++                    Toast.makeText(this, "Pilih gambar dulu agar preset ini terlihat",
++                            Toast.LENGTH_SHORT).show();
++                }
++                break;
++            default: // Minimal
++                mSettings.showLabel = false;
++                mSettings.showChips = false;
++                mSettings.subtitleMode = SuperIconSettings.SUB_NONE;
++                break;
++        }
++        mPreview.solidStyle = mSolidStyle;
++        syncControls();
++    }
++
++    private void copyStyle() {
++        File image = null;
++        if (mPending != null && mPending.exists()) {
++            image = mPending;
++        } else if (!mRemoveImage) {
++            File f = SuperIconSettings.imageFile(this, mId);
++            image = f.exists() ? f : null;
++        }
++        SuperIconSettings.saveClip(this, mSettings, mSolidStyle, image);
++        Toast.makeText(this, "Gaya disalin", Toast.LENGTH_SHORT).show();
++    }
++
++    private void pasteStyle() {
++        SuperIconSettings.Clip clip = SuperIconSettings.loadClip(this);
++        if (clip == null) {
++            Toast.makeText(this, "Belum ada gaya yang disalin", Toast.LENGTH_SHORT).show();
++            return;
++        }
++        // The subtitle and the chosen shortcuts belong to the app, so they are kept
++        SuperIconSettings pasted = clip.settings;
++        pasted.subtitleMode = mSettings.subtitleMode;
++        pasted.subtitleText = mSettings.subtitleText;
++        pasted.chipIds = mSettings.chipIds;
++        mSettings = pasted;
++        mSolidStyle = clip.solid;
++        mPreview.solidStyle = mSolidStyle;
++        if (mPending != null) {
++            mPending.delete();
++            mPending = null;
++        }
++        if (clip.image != null) {
++            File temp = SuperIconSettings.tempImageFile(this, mId);
++            if (SuperIconSettings.copyFile(clip.image, temp)) {
++                mPending = temp;
++                mRemoveImage = false;
++                mPreview.image = BitmapFactory.decodeFile(temp.getAbsolutePath());
++            }
++        } else {
++            mPreview.image = null;
++            mRemoveImage = true;
++        }
 +        syncControls();
 +    }
 +
@@ -1011,6 +1313,18 @@ index 0000000..728d79c
 +        mShowIcon.setChecked(mSettings.showIcon);
 +        mShowLabel.setChecked(mSettings.showLabel);
 +        mShowChips.setChecked(mSettings.showChips);
++        mShowDot.setChecked(mSettings.showDot);
++        mPopupExtras.setChecked(mSettings.popupExtras);
++        setSeek(mGlassAlpha, mSettings.glassAlpha);
++        mShine.setChecked(mSettings.glassShine);
++        setSeek(mIconScale, Math.round(mSettings.iconScale * 100));
++        mRing.setChecked(mSettings.iconRing);
++        checkIndex(mSubGroup, mSettings.subtitleMode);
++        mSubText.setEnabled(mSettings.subtitleMode == SuperIconSettings.SUB_TEXT);
++        mSubText.setText(mSettings.subtitleText);
++        for (int i = 0; i < mShortcutChecks.size(); i++) {
++            mShortcutChecks.get(i).setChecked(mSettings.chipIds.contains(mShortcutIds.get(i)));
++        }
 +        mSyncing = false;
 +        refreshSwatches();
 +        refreshGrid();
@@ -1173,13 +1487,78 @@ index 0000000..728d79c
 +        int regular;
 +        float baseText;
 +        float ratio = 0.5f;
++        Runnable onGesture;
++        float lastK = 1f;
++        float lastX;
++        float lastY;
++        final ScaleGestureDetector scaler;
 +
 +        Preview(Context c) {
 +            super(c);
++            scaler = new ScaleGestureDetector(c,
++                    new ScaleGestureDetector.SimpleOnScaleGestureListener() {
++                        @Override
++                        public boolean onScale(ScaleGestureDetector detector) {
++                            if (settings != null) {
++                                settings.imageZoom = Math.max(SuperIconSettings.MIN_ZOOM,
++                                        Math.min(SuperIconSettings.MAX_ZOOM,
++                                                settings.imageZoom * detector.getScaleFactor()));
++                                invalidate();
++                                if (onGesture != null) {
++                                    onGesture.run();
++                                }
++                            }
++                            return true;
++                        }
++                    });
 +            d = c.getResources().getDisplayMetrics().density;
 +            stroke.setStyle(Paint.Style.STROKE);
 +            stroke.setStrokeWidth(d);
 +            backPaint.setColor(0xFF6B6F76);
++        }
++
++        /** Drag to pan and pinch to zoom the background image. */
++        @Override
++        public boolean onTouchEvent(MotionEvent e) {
++            if (image == null || settings == null) {
++                return super.onTouchEvent(e);
++            }
++            getParent().requestDisallowInterceptTouchEvent(true);
++            scaler.onTouchEvent(e);
++            int action = e.getActionMasked();
++            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
++                lastX = e.getX();
++                lastY = e.getY();
++            } else if (action == MotionEvent.ACTION_POINTER_UP) {
++                int keep = e.getActionIndex() == 0 ? 1 : 0;
++                lastX = e.getX(keep);
++                lastY = e.getY(keep);
++            } else if (action == MotionEvent.ACTION_MOVE && e.getPointerCount() == 1
++                    && !scaler.isInProgress()) {
++                float dx = e.getX() - lastX;
++                float dy = e.getY() - lastY;
++                lastX = e.getX();
++                lastY = e.getY();
++                float bw = image.getWidth();
++                float bh = image.getHeight();
++                float scale = Math.max(lay.pill.width() / bw, lay.pill.height() / bh)
++                        * settings.imageZoom;
++                float rangeX = Math.abs(bw * scale - lay.pill.width()) / 2f;
++                float rangeY = Math.abs(bh * scale - lay.pill.height()) / 2f;
++                if (rangeX > 1f) {
++                    settings.imageX = Math.max(-1f, Math.min(1f,
++                            settings.imageX + dx / (lastK * rangeX)));
++                }
++                if (rangeY > 1f) {
++                    settings.imageY = Math.max(-1f, Math.min(1f,
++                            settings.imageY + dy / (lastK * rangeY)));
++                }
++                invalidate();
++                if (onGesture != null) {
++                    onGesture.run();
++                }
++            }
++            return true;
 +        }
 +
 +        int chipCount() {
@@ -1203,6 +1582,7 @@ index 0000000..728d79c
 +            int vw = cellW * sx;
 +            int vh = cellH * sy;
 +            float k = Math.min(getWidth() / (float) vw, (getWidth() * 0.5f) / (float) cellW);
++            lastK = k;
 +            canvas.drawRoundRect(0, 0, getWidth(), getHeight(), 16 * d, 16 * d, backPaint);
 +            canvas.save();
 +            canvas.translate((getWidth() - vw * k) / 2f, 0);
@@ -1210,7 +1590,7 @@ index 0000000..728d79c
 +            int chips = chipCount();
 +            int fillColor = settings.fillColor(solidStyle, tint);
 +            lay.compute(vw, vh, sx, sy, fillColor != 0, settings.showIcon, regular, d, ratio,
-+                    chips);
++                    chips, settings.iconScale);
 +            lay.drawBackground(canvas, fillColor, image, settings, fill, stroke, d);
 +            if (settings.showIcon && icon != null) {
 +                canvas.drawBitmap(icon, null, lay.icon, null);
@@ -1236,7 +1616,17 @@ index 0000000..728d79c
 +                }
 +            }
 +
-+            if (settings.showLabel) {
++            String sub = "";
++            if (settings.subtitleMode == SuperIconSettings.SUB_TEXT) {
++                sub = settings.subtitleText;
++            } else if (settings.subtitleMode == SuperIconSettings.SUB_COUNT) {
++                sub = "3 notifikasi";
++            } else if (settings.subtitleMode == SuperIconSettings.SUB_LAST) {
++                sub = "Nama: isi pesan terakhir";
++            }
++            CharSequence composed = SuperIconSettings.composeText(label, settings.showLabel, sub,
++                    labelColor);
++            if (composed.length() > 0) {
 +                text.setTextSize(baseText * settings.labelScale);
 +                text.setColor(labelColor);
 +                int boxW = Math.max(1, vw - lay.padStart - lay.padEnd);
@@ -1245,12 +1635,14 @@ index 0000000..728d79c
 +                Layout.Alignment align = h == 0 ? Layout.Alignment.ALIGN_NORMAL
 +                        : (h == 1 ? Layout.Alignment.ALIGN_CENTER
 +                        : Layout.Alignment.ALIGN_OPPOSITE);
-+                String shown = label;
-+                StaticLayout sl = new StaticLayout(shown, text, boxW, align, 1f, 0f, false);
-+                if (sl.getLineCount() > 2) {
-+                    int end = Math.max(1, sl.getLineEnd(1) - 1);
-+                    shown = label.substring(0, Math.min(end, label.length())).trim() + "…";
-+                    sl = new StaticLayout(shown, text, boxW, align, 1f, 0f, false);
++                int maxLines = sub.isEmpty() ? 2 : 3;
++                StaticLayout sl = new StaticLayout(composed, text, boxW, align, 1f, 0f, false);
++                if (sl.getLineCount() > maxLines) {
++                    // Cut after the last line that fits, so the box does not overflow
++                    int end = Math.max(1, sl.getLineEnd(maxLines - 1) - 1);
++                    CharSequence cut = composed.subSequence(0, Math.min(end, composed.length()));
++                    sl = new StaticLayout(TextUtils.concat(cut, "…"), text, boxW, align, 1f, 0f,
++                            false);
 +                }
 +                float boxH = vh - lay.padTop - lay.padBottom;
 +                float y = lay.padTop + (v == 0 ? 0 : (v == 1 ? (boxH - sl.getHeight()) / 2f
@@ -1264,10 +1656,10 @@ index 0000000..728d79c
 +}
 diff --git a/src/com/android/launcher3/supericon/SuperIconLayout.java b/src/com/android/launcher3/supericon/SuperIconLayout.java
 new file mode 100644
-index 0000000..e41982b
+index 0000000..04e66f5
 --- /dev/null
 +++ b/src/com/android/launcher3/supericon/SuperIconLayout.java
-@@ -0,0 +1,178 @@
+@@ -0,0 +1,207 @@
 +/*
 + * Copyright (C) 2026 The Android Open Source Project
 + *
@@ -1288,7 +1680,9 @@ index 0000000..e41982b
 +import android.graphics.Bitmap;
 +import android.graphics.Canvas;
 +import android.graphics.Color;
++import android.graphics.LinearGradient;
 +import android.graphics.Paint;
++import android.graphics.Shader;
 +import android.graphics.Rect;
 +import android.graphics.RectF;
 +
@@ -1320,6 +1714,10 @@ index 0000000..e41982b
 +    public int padEnd;
 +    public int padBottom;
 +
++    private final Paint mShine = new Paint(Paint.ANTI_ALIAS_FLAG);
++    private float mShineTop = Float.NaN;
++    private float mShineBottom = Float.NaN;
++
 +    /** The most shortcut chips a size can show. */
 +    public static int maxChips(int spanX, int spanY) {
 +        if (spanY == 1) {
@@ -1328,11 +1726,14 @@ index 0000000..e41982b
 +        return spanX == 2 && spanY == 2 ? 3 : 0;
 +    }
 +
-+    public static int iconSizeFor(int spanX, int spanY, int regularIcon) {
++    public static int iconSizeFor(int spanX, int spanY, int regularIcon, float scale) {
++        float base;
 +        if (spanX == 1 && spanY == 2) {
-+            return Math.round(regularIcon * 0.85f);
++            base = regularIcon * 0.85f;
++        } else {
++            base = spanY == 2 ? regularIcon : regularIcon * 0.78f;
 +        }
-+        return spanY == 2 ? regularIcon : Math.round(regularIcon * 0.78f);
++        return Math.max(8, Math.round(base * scale));
 +    }
 +
 +    /**
@@ -1341,9 +1742,10 @@ index 0000000..e41982b
 +     * @param d display density
 +     * @param cornerRatio 0..0.5 corner radius as a fraction of the one-row pill height
 +     * @param chipCount how many shortcut chips there are to show (0 for none)
++     * @param iconScale multiplier for the icon size
 +     */
 +    public void compute(int w, int h, int spanX, int spanY, boolean solid, boolean showIcon,
-+            int regularIcon, float d, float cornerRatio, int chipCount) {
++            int regularIcon, float d, float cornerRatio, int chipCount, float iconScale) {
 +        final boolean tall = spanX == 1 && spanY == 2;
 +        final boolean card = spanX >= 2 && spanY == 2;
 +        float side = 3 * d;
@@ -1352,7 +1754,15 @@ index 0000000..e41982b
 +        float vIn = (rowH - base) / 2f;
 +        pill.set(side, vIn, w - side, h - vIn);
 +        radius = Math.min(cornerRatio * base, Math.min(pill.width(), pill.height()) / 2f);
-+        iconSize = iconSizeFor(spanX, spanY, regularIcon);
++        iconSize = iconSizeFor(spanX, spanY, regularIcon, iconScale);
++        if (!tall && !(spanX >= 2 && spanY == 2)) {
++            // In a one-row pill the icon must stay inside the pill
++            iconSize = Math.min(iconSize, Math.round(pill.height() - 4 * d));
++        } else if (tall) {
++            iconSize = Math.min(iconSize, Math.round(w - 8 * d));
++        } else {
++            iconSize = Math.min(iconSize, Math.round(Math.min(w, h) * 0.6f));
++        }
 +        chipCountFit = 0;
 +        chipRows = false;
 +
@@ -1431,15 +1841,26 @@ index 0000000..e41982b
 +    public void drawBackground(Canvas canvas, int fillColor, Bitmap image, SuperIconSettings s,
 +            Paint fill, Paint stroke, float d) {
 +        final boolean solid = fillColor != 0;
-+        fill.setColor(solid ? fillColor : Color.argb(64, 255, 255, 255));
++        fill.setColor(solid ? fillColor
++                : Color.argb(Math.round(s.glassAlpha * 255 / 100f), 255, 255, 255));
 +        canvas.drawRoundRect(pill, radius, radius, fill);
++        if (!solid && s.glassShine) {
++            if (mShineTop != pill.top || mShineBottom != pill.bottom) {
++                mShine.setShader(new LinearGradient(0, pill.top, 0, pill.bottom,
++                        Color.argb(90, 255, 255, 255), Color.argb(0, 255, 255, 255),
++                        Shader.TileMode.CLAMP));
++                mShineTop = pill.top;
++                mShineBottom = pill.bottom;
++            }
++            canvas.drawRoundRect(pill, radius, radius, mShine);
++        }
 +        if (image != null) {
 +            SuperIconSettings.drawImage(canvas, image, pill, radius, s);
 +        } else if (!solid) {
 +            stroke.setColor(Color.argb(80, 255, 255, 255));
 +            canvas.drawRoundRect(pill, radius, radius, stroke);
 +        }
-+        if (solid && s.showIcon) {
++        if (solid && s.showIcon && s.iconRing) {
 +            fill.setColor(Color.argb(235, 255, 255, 255));
 +            canvas.drawCircle(icon.exactCenterX(), icon.exactCenterY(),
 +                    icon.width() / 2f + 3 * d, fill);
@@ -1448,10 +1869,10 @@ index 0000000..e41982b
 +}
 diff --git a/src/com/android/launcher3/supericon/SuperIconSettings.java b/src/com/android/launcher3/supericon/SuperIconSettings.java
 new file mode 100644
-index 0000000..cb11ee8
+index 0000000..1372ada
 --- /dev/null
 +++ b/src/com/android/launcher3/supericon/SuperIconSettings.java
-@@ -0,0 +1,420 @@
+@@ -0,0 +1,556 @@
 +/*
 + * Copyright (C) 2026 The Android Open Source Project
 + *
@@ -1479,10 +1900,14 @@ index 0000000..cb11ee8
 +import android.graphics.Path;
 +import android.graphics.RectF;
 +import android.net.Uri;
++import android.text.SpannableStringBuilder;
++import android.text.style.ForegroundColorSpan;
++import android.text.style.RelativeSizeSpan;
 +import android.util.LruCache;
 +
 +import androidx.core.graphics.ColorUtils;
 +
++import org.json.JSONArray;
 +import org.json.JSONException;
 +import org.json.JSONObject;
 +
@@ -1513,6 +1938,11 @@ index 0000000..cb11ee8
 +    public static final int BG_ADAPTIVE = 1;
 +    public static final int BG_CUSTOM = 2;
 +
++    public static final int SUB_NONE = 0;
++    public static final int SUB_TEXT = 1;
++    public static final int SUB_COUNT = 2;
++    public static final int SUB_LAST = 3;
++
 +    public static final float MIN_ZOOM = 0.3f;
 +    public static final float MAX_ZOOM = 3f;
 +
@@ -1538,6 +1968,22 @@ index 0000000..cb11ee8
 +    public boolean showIcon = true;
 +    public boolean showLabel = true;
 +    public boolean showChips = true;
++    /** Whether the icon shows its notification dot. */
++    public boolean showDot = true;
++    /** Whether the long-press menu lists the app's shortcuts and notifications. */
++    public boolean popupExtras = true;
++    /** Ids of the app shortcuts to show as chips, in order; empty means the first ones found. */
++    public ArrayList<String> chipIds = new ArrayList<>();
++    /** Icon size multiplier, 0.5..1.4, and whether the solid style puts it in a white ring. */
++    public float iconScale = 1f;
++    public boolean iconRing = true;
++    /** Opacity of the glass style's fill, 5..60 percent, and whether it has a highlight. */
++    public int glassAlpha = 25;
++    public boolean glassShine = false;
++    /** Second line under the label: nothing, {@link #subtitleText}, the notification count or
++     *  the text of the latest notification. */
++    public int subtitleMode = SUB_NONE;
++    public String subtitleText = "";
 +
 +    public interface Listener {
 +        void onSuperIconSettingsChanged(long itemId);
@@ -1602,6 +2048,91 @@ index 0000000..cb11ee8
 +        return defaultColor;
 +    }
 +
++    /**
++     * The text of the label box: the app name (if shown) and, under it in a smaller size and a
++     * lighter shade, the subtitle. Empty if there is neither.
++     */
++    public static CharSequence composeText(CharSequence label, boolean showLabel,
++            String subtitle, int labelColor) {
++        boolean hasLabel = showLabel && label != null && label.length() > 0;
++        boolean hasSub = subtitle != null && !subtitle.isEmpty();
++        if (!hasLabel && !hasSub) {
++            return "";
++        }
++        if (!hasSub) {
++            return label;
++        }
++        SpannableStringBuilder b = new SpannableStringBuilder();
++        if (hasLabel) {
++            b.append(label);
++            b.append('\n');
++        }
++        int start = b.length();
++        b.append(subtitle);
++        b.setSpan(new RelativeSizeSpan(0.82f), start, b.length(), 0);
++        b.setSpan(new ForegroundColorSpan(Color.argb(204, Color.red(labelColor),
++                Color.green(labelColor), Color.blue(labelColor))), start, b.length(), 0);
++        return b;
++    }
++
++    // ------------------------------------------------------------ style clipboard
++
++    /** A copied style: the settings, the style, and optionally the background image. */
++    public static final class Clip {
++        public SuperIconSettings settings;
++        public boolean solid;
++        public File image;
++    }
++
++    public static void saveClip(Context context, SuperIconSettings s, boolean solid,
++            File image) {
++        try {
++            JSONObject o = new JSONObject();
++            o.put("s", s.toJson());
++            o.put("solid", solid);
++            prefs(context).edit().putString("clip", o.toString()).apply();
++        } catch (JSONException e) {
++            return;
++        }
++        File dest = new File(dir(context), "clip.png");
++        dest.delete();
++        if (image != null && image.exists()) {
++            copyFile(image, dest);
++        }
++    }
++
++    public static Clip loadClip(Context context) {
++        String json = prefs(context).getString("clip", null);
++        if (json == null) {
++            return null;
++        }
++        try {
++            JSONObject o = new JSONObject(json);
++            Clip c = new Clip();
++            c.settings = fromJson(o.getJSONObject("s"));
++            c.solid = o.optBoolean("solid", true);
++            File f = new File(dir(context), "clip.png");
++            c.image = f.exists() ? f : null;
++            return c;
++        } catch (JSONException e) {
++            return null;
++        }
++    }
++
++    public static boolean copyFile(File from, File to) {
++        try (InputStream in = new java.io.FileInputStream(from);
++                FileOutputStream out = new FileOutputStream(to)) {
++            byte[] buf = new byte[8192];
++            int n;
++            while ((n = in.read(buf)) > 0) {
++                out.write(buf, 0, n);
++            }
++            return true;
++        } catch (IOException e) {
++            return false;
++        }
++    }
++
 +    // --------------------------------------------------------------- storage
 +
 +    public JSONObject toJson() throws JSONException {
@@ -1619,6 +2150,15 @@ index 0000000..cb11ee8
 +        o.put("icon", showIcon);
 +        o.put("label", showLabel);
 +        o.put("chips", showChips);
++        o.put("dot", showDot);
++        o.put("popup", popupExtras);
++        o.put("chipIds", new JSONArray(chipIds));
++        o.put("iconScale", iconScale);
++        o.put("ring", iconRing);
++        o.put("glassAlpha", glassAlpha);
++        o.put("shine", glassShine);
++        o.put("subMode", subtitleMode);
++        o.put("subText", subtitleText);
 +        return o;
 +    }
 +
@@ -1637,6 +2177,23 @@ index 0000000..cb11ee8
 +        s.showIcon = o.optBoolean("icon", true);
 +        s.showLabel = o.optBoolean("label", true);
 +        s.showChips = o.optBoolean("chips", true);
++        s.showDot = o.optBoolean("dot", true);
++        s.popupExtras = o.optBoolean("popup", true);
++        JSONArray ids = o.optJSONArray("chipIds");
++        if (ids != null) {
++            for (int i = 0; i < ids.length(); i++) {
++                String id = ids.optString(i, "");
++                if (!id.isEmpty()) {
++                    s.chipIds.add(id);
++                }
++            }
++        }
++        s.iconScale = clamp((float) o.optDouble("iconScale", 1), 0.5f, 1.4f);
++        s.iconRing = o.optBoolean("ring", true);
++        s.glassAlpha = Math.max(5, Math.min(60, o.optInt("glassAlpha", 25)));
++        s.glassShine = o.optBoolean("shine", false);
++        s.subtitleMode = Math.max(0, Math.min(3, o.optInt("subMode", SUB_NONE)));
++        s.subtitleText = o.optString("subText", "");
 +        return s;
 +    }
 +
@@ -1873,13 +2430,14 @@ index 0000000..cb11ee8
 +    }
 +}
 diff --git a/src/com/android/launcher3/views/SuperIconView.java b/src/com/android/launcher3/views/SuperIconView.java
-index 11f19e4..70bbad1 100644
+index 11f19e4..d96d5fb 100644
 --- a/src/com/android/launcher3/views/SuperIconView.java
 +++ b/src/com/android/launcher3/views/SuperIconView.java
-@@ -15,57 +15,97 @@
+@@ -15,57 +15,110 @@
   */
  package com.android.launcher3.views;
  
++import android.app.Notification;
 +import android.content.ComponentName;
  import android.content.Context;
 +import android.content.pm.ShortcutInfo;
@@ -1894,17 +2452,23 @@ index 11f19e4..70bbad1 100644
  import android.graphics.Region;
  import android.graphics.drawable.Drawable;
 +import android.os.AsyncTask;
++import android.os.Bundle;
 +import android.os.UserHandle;
++import android.service.notification.StatusBarNotification;
  import android.text.TextPaint;
  import android.text.TextUtils;
  import android.util.AttributeSet;
  import android.util.TypedValue;
  import android.view.Gravity;
--
--import androidx.core.graphics.ColorUtils;
 +import android.view.MotionEvent;
  
+-import androidx.core.graphics.ColorUtils;
+-
++import com.android.launcher3.Launcher;
  import com.android.launcher3.WorkspaceItemInfo;
++import com.android.launcher3.ItemInfo;
++import com.android.launcher3.dot.DotInfo;
++import com.android.launcher3.notification.NotificationKeyData;
  import com.android.launcher3.graphics.IconShape;
 +import com.android.launcher3.popup.PopupPopulator;
 +import com.android.launcher3.shortcuts.DeepShortcutManager;
@@ -1912,7 +2476,9 @@ index 11f19e4..70bbad1 100644
 +import com.android.launcher3.supericon.SuperIconSettings;
 +
 +import java.util.ArrayList;
++import java.util.HashMap;
 +import java.util.List;
++import java.util.Map;
  
  /**
 - * An app icon that spans several cells ("supericon") on the workspace: 2x1, 3x1 or 2x2. The
@@ -1979,6 +2545,10 @@ index 11f19e4..70bbad1 100644
 +    private Bitmap mImage;
 +    private Drawable mShownIcon;
 +    private CharSequence mLabelText;
++    private WorkspaceItemInfo mInfo;
++    private String mSubtitle = "";
++    private boolean mAllowText;
++    private int mSubToken;
 +    private boolean mSolidStyle;
 +    private int mFill;
 +    private int mLabelColor;
@@ -1991,7 +2561,7 @@ index 11f19e4..70bbad1 100644
  
      public SuperIconView(Context context) {
          this(context, null);
-@@ -81,77 +121,250 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -81,77 +134,377 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          mStrokePaint.setStyle(Paint.Style.STROKE);
          mStrokePaint.setStrokeWidth(mDensity);
          mBaseTextSize = getTextSize();
@@ -2000,15 +2570,16 @@ index 11f19e4..70bbad1 100644
  
 -    /** The label is always shown inside a supericon, even if app labels are hidden. */
 +    /**
-+     * The label is shown inside a supericon even if app labels are hidden, unless this supericon
-+     * has its label turned off. The text itself is removed in that case: making it transparent is
-+     * not enough, as launcher state changes animate the text alpha back to opaque.
++     * The label text is managed here: it is the app name (when shown) and a subtitle, and is
++     * emptied rather than made transparent when hidden, as launcher state changes animate the
++     * text alpha back to opaque. The base class may only set the text while {@link #mAllowText}
++     * is set, which is while the item is applied (so that custom app names are kept).
 +     */
      @Override
      protected boolean isTextHidden() {
 -        return false;
 +        // Also called from the BubbleTextView constructor, before our fields are initialised
-+        return mSettings != null && !mSettings.showLabel;
++        return mSettings != null && !mAllowText;
 +    }
 +
 +    @Override
@@ -2047,6 +2618,7 @@ index 11f19e4..70bbad1 100644
 -        mSolid = WorkspaceItemInfo.isSolidStyle(info.superStyle);
 -        mCard = info.spanY > 1;
 -        // Must be set before the icon is applied so the compound drawable gets the right size
++        mInfo = info;
 +        mItemId = info.id;
 +        mSpanX = Math.max(1, info.spanX);
 +        mSpanY = Math.max(1, info.spanY);
@@ -2056,10 +2628,10 @@ index 11f19e4..70bbad1 100644
 +        loadSettings();
 +        // Must be set before the icon is applied so the icon gets the right size
          setIconSize(iconSize());
++        mAllowText = true;
          super.applyFromWorkspaceItem(info, promiseStateChanged);
-+        if (getText().length() == 0) {
-+            mLabelText = info.title;
-+        }
++        mAllowText = false;
++        mLabelText = getText().length() > 0 ? getText() : info.title;
          mTint = info.iconColor != 0 ? (info.iconColor | 0xFF000000) : 0xFF5F5E5A;
 +        if (isAttachedToWindow() && mComponent != null) {
 +            SuperIconSettings.setActive(mItemId, mComponent.flattenToShortString());
@@ -2080,37 +2652,22 @@ index 11f19e4..70bbad1 100644
  
      private void applyStyle() {
 -        setTextSize(TypedValue.COMPLEX_UNIT_PX, mBaseTextSize);
+-        // Allow two lines instead of the single (truncated) line of regular workspace labels
 +        mFill = mSettings.fillColor(mSolidStyle, mTint);
 +        mLabelColor = mSettings.resolveLabelColor(mFill, mImage != null,
 +                mDefaultTextColors.getDefaultColor());
 +
 +        setTextSize(TypedValue.COMPLEX_UNIT_PX, mBaseTextSize * mSettings.labelScale);
-         // Allow two lines instead of the single (truncated) line of regular workspace labels
++        // Allow several lines instead of the single (truncated) line of regular workspace labels
          setSingleLine(false);
          setMinLines(1);
-         setMaxLines(2);
+-        setMaxLines(2);
          setEllipsize(TextUtils.TruncateAt.END);
 -        if (mSolid) {
 -            setTextColor(tintIsLight() ? Color.argb(230, 20, 20, 20) : Color.WHITE);
--        }
--        if (mCard) {
--            setGravity(Gravity.BOTTOM | Gravity.START);
--            setCompoundDrawablePadding(0);
--            setCompoundDrawables(null, null, null, null);
--        } else {
--            setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
--            setCompoundDrawablePadding((int) ((mSolid ? 10 : 7) * mDensity));
 +        setTextColor(mLabelColor);
-+        CharSequence current = getText();
-+        if (mSettings.showLabel) {
-+            if (current.length() == 0 && mLabelText != null) {
-+                setText(mLabelText);
-+            }
-+        } else if (current.length() > 0) {
-+            mLabelText = current;
-+            setText("");
-         }
-+        setTextVisibility(mSettings.showLabel);
++        setTextVisibility(true);
++        refreshSubtitle();
 +
 +        int h = mSettings.effectiveH(mSpanX, mSpanY);
 +        int v = mSettings.effectiveV(mSpanX, mSpanY, chipCountForLayout());
@@ -2118,10 +2675,132 @@ index 11f19e4..70bbad1 100644
 +        int gv = v == 0 ? Gravity.TOP : (v == 1 ? Gravity.CENTER_VERTICAL : Gravity.BOTTOM);
 +        setGravity(gh | gv);
 +        setCompoundDrawables(null, null, null, null);
-         requestLayout();
-     }
- 
--    /** In the card size the icon is drawn by {@link #onDraw}, not as a compound drawable. */
++        requestLayout();
++    }
++
++    // --------------------------------------------------------------- subtitle
++
++    /** Sets the label box text from the app name and the subtitle. */
++    private void updateText() {
++        mSubtitle = mSubtitle == null ? "" : mSubtitle;
++        setMaxLines(mSubtitle.isEmpty() ? 2 : 3);
++        setText(SuperIconSettings.composeText(mLabelText, mSettings.showLabel, mSubtitle,
++                mLabelColor));
++        requestLayout();
++        invalidate();
++    }
++
++    /** Works out the subtitle (text, notification count or latest notification). */
++    private void refreshSubtitle() {
++        final int token = ++mSubToken;
++        switch (mSettings.subtitleMode) {
++            case SuperIconSettings.SUB_TEXT:
++                mSubtitle = mSettings.subtitleText;
++                break;
++            case SuperIconSettings.SUB_COUNT: {
++                DotInfo dot = currentDot();
++                int n = dot == null ? 0 : dot.getNotificationCount();
++                mSubtitle = n > 0 ? n + " notifikasi" : "";
++                break;
++            }
++            case SuperIconSettings.SUB_LAST:
++                mSubtitle = "";
++                loadLatestNotification(token);
++                break;
++            default:
++                mSubtitle = "";
++                break;
+         }
+-        if (mCard) {
+-            setGravity(Gravity.BOTTOM | Gravity.START);
+-            setCompoundDrawablePadding(0);
+-            setCompoundDrawables(null, null, null, null);
+-        } else {
+-            setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+-            setCompoundDrawablePadding((int) ((mSolid ? 10 : 7) * mDensity));
++        updateText();
++    }
++
++    private DotInfo currentDot() {
++        if (mInfo == null) {
++            return null;
+         }
+-        requestLayout();
++        try {
++            return ActivityContext.lookupContext(getContext()).getDotInfoForItem(mInfo);
++        } catch (RuntimeException e) {
++            return null;
++        }
++    }
++
++    /** Reads the text of the app's latest notification in the background. */
++    private void loadLatestNotification(final int token) {
++        DotInfo dot = currentDot();
++        if (dot == null || dot.getNotificationKeys().isEmpty()) {
++            return;
++        }
++        final Launcher launcher;
++        try {
++            launcher = Launcher.getLauncher(getContext());
++        } catch (RuntimeException e) {
++            return;
++        }
++        final List<NotificationKeyData> keys = new ArrayList<>(dot.getNotificationKeys());
++        AsyncTask.THREAD_POOL_EXECUTOR.execute(() -> {
++            String text = "";
++            try {
++                List<StatusBarNotification> list =
++                        launcher.getPopupDataProvider().getStatusBarNotificationsForKeys(keys);
++                StatusBarNotification latest = null;
++                for (StatusBarNotification sbn : list) {
++                    if (latest == null || sbn.getPostTime() > latest.getPostTime()) {
++                        latest = sbn;
++                    }
++                }
++                if (latest != null) {
++                    Bundle extras = latest.getNotification().extras;
++                    CharSequence title = extras.getCharSequence(Notification.EXTRA_TITLE);
++                    CharSequence body = extras.getCharSequence(Notification.EXTRA_TEXT);
++                    if (!TextUtils.isEmpty(title) && !TextUtils.isEmpty(body)) {
++                        text = title + ": " + body;
++                    } else if (!TextUtils.isEmpty(body)) {
++                        text = body.toString();
++                    } else if (!TextUtils.isEmpty(title)) {
++                        text = title.toString();
++                    }
++                }
++            } catch (RuntimeException e) {
++                text = "";
++            }
++            final String result = text;
++            post(() -> {
++                if (token == mSubToken) {
++                    mSubtitle = result;
++                    updateText();
++                }
++            });
++        });
++    }
++
++    /** The notification dot can be turned off per supericon. */
++    @Override
++    protected void drawDotIfNecessary(Canvas canvas) {
++        if (mSettings != null && !mSettings.showDot) {
++            return;
++        }
++        super.drawDotIfNecessary(canvas);
++    }
++
++    /** Notification dots change when notifications arrive or go; refresh a notification subtitle. */
++    @Override
++    public void applyDotState(ItemInfo itemInfo, boolean animate) {
++        super.applyDotState(itemInfo, animate);
++        if (mInfo != null && mLabelText != null
++                && mSettings.subtitleMode >= SuperIconSettings.SUB_COUNT) {
++            refreshSubtitle();
++        }
++    }
++
 +    // ------------------------------------------------------------------ chips
 +
 +    /** Loads the app's shortcuts (and their icons) in the background. */
@@ -2140,12 +2819,29 @@ index 11f19e4..70bbad1 100644
 +        final int token = ++mLoadToken;
 +        final int dpi = getResources().getDisplayMetrics().densityDpi;
 +        final int iconPx = Math.round(32 * mDensity);
++        final List<String> chosen = new ArrayList<>(mSettings.chipIds);
 +        AsyncTask.THREAD_POOL_EXECUTOR.execute(() -> {
 +            final List<Chip> out = new ArrayList<>();
 +            try {
 +                DeepShortcutManager manager = DeepShortcutManager.getInstance(ctx);
 +                List<ShortcutInfo> list = manager.queryForShortcutsContainer(component, user);
 +                list = PopupPopulator.sortAndFilterShortcuts(list, null);
++                if (!chosen.isEmpty()) {
++                    Map<String, ShortcutInfo> byId = new HashMap<>();
++                    for (ShortcutInfo si : list) {
++                        byId.put(si.getId(), si);
++                    }
++                    List<ShortcutInfo> picked = new ArrayList<>();
++                    for (String id : chosen) {
++                        ShortcutInfo si = byId.get(id);
++                        if (si != null) {
++                            picked.add(si);
++                        }
++                    }
++                    if (!picked.isEmpty()) {
++                        list = picked;
++                    }
++                }
 +                for (ShortcutInfo si : list) {
 +                    if (out.size() >= max) {
 +                        break;
@@ -2211,8 +2907,9 @@ index 11f19e4..70bbad1 100644
 +                break;
 +        }
 +        return super.onTouchEvent(event);
-+    }
-+
+     }
+ 
+-    /** In the card size the icon is drawn by {@link #onDraw}, not as a compound drawable. */
 +    /** A tap on a chip starts that shortcut instead of the app. */
 +    @Override
 +    public boolean performClick() {
@@ -2262,7 +2959,9 @@ index 11f19e4..70bbad1 100644
 -    /** Icon size: smaller than a regular icon in a one-row pill, to leave room for the label. */
      private int iconSize() {
 -        return mCard ? regularIconSize() : Math.round(regularIconSize() * ICON_SCALE);
-+        return SuperIconLayout.iconSizeFor(mSpanX, mSpanY, regularIconSize());
++        // May run during the base class constructor, before mSettings exists
++        return SuperIconLayout.iconSizeFor(mSpanX, mSpanY, regularIconSize(),
++                mSettings == null ? 1f : mSettings.iconScale);
      }
  
      /** Corner radius as a fraction (0..0.5) of the pill height, from the current icon shape. */
@@ -2271,7 +2970,7 @@ index 11f19e4..70bbad1 100644
          IconShape shape = IconShape.getShape();
          if (shape == sShape) {
              return sCornerRatio;
-@@ -176,35 +389,31 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -176,35 +529,32 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          return ratio;
      }
  
@@ -2318,14 +3017,15 @@ index 11f19e4..70bbad1 100644
 -            }
 -            fitText(textAvail);
 +            mLayout.compute(w, h, mSpanX, mSpanY, mFill != 0, mSettings.showIcon,
-+                    regularIconSize(), mDensity, cornerRatio(), chipCountForLayout());
++                    regularIconSize(), mDensity, cornerRatio(), chipCountForLayout(),
++                    mSettings.iconScale);
 +            setPaddingRelative(mLayout.padStart, mLayout.padTop, mLayout.padEnd,
 +                    mLayout.padBottom);
 +            fitText(w - mLayout.padStart - mLayout.padEnd);
          }
          super.onMeasure(widthMeasureSpec, heightMeasureSpec);
      }
-@@ -218,8 +427,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -218,8 +568,9 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
          if (text == null || text.length() == 0 || available <= 0) {
              return;
          }
@@ -2337,7 +3037,7 @@ index 11f19e4..70bbad1 100644
          mMeasurePaint.set(getPaint());
          mMeasurePaint.setTypeface(getPaint().getTypeface());
          String[] words = text.toString().split("\\s+");
-@@ -242,48 +452,71 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
+@@ -242,48 +593,71 @@ public class SuperIconView extends DoubleShadowBubbleTextView {
  
      @Override
      public void getIconBounds(Rect outBounds) {
